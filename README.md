@@ -1,13 +1,14 @@
-# audio_no_callback
-This sample demonstrates how to generate sound using libretro API with no audio callback.
+# libretro-miniaudio
 
-What this means is that libretro's audio callback function has to be called inside retro_run
-at least once per run.
+[miniaudio](https://miniaud.io/) use for libretro.
 
-The audio samplerate in this sample is set to 4800KHz, sound is 16-bit mono.
+## Usage
 
-I am trying to get ot working with [miniaudio](https://miniaud.io/)
-
+```c
+#define LIBRETRO_MINIAUDIO_OGG // Optionally enable ogg support.
+#define LIBRETRO_MINIAUDIO_IMPLEMENTATION
+#include "libretro-miniaudio.h"
+```
 
 ## Building
 To compile, you will need a C compiler and assorted toolchain installed.
@@ -18,11 +19,11 @@ To compile, you will need a C compiler and assorted toolchain installed.
 
 ```
 # mac
-/Applications/RetroArch.app/Contents/MacOS/RetroArch -L testaudio_no_callback_libretro.dylib
+/Applications/RetroArch.app/Contents/MacOS/RetroArch -L testaudio_no_callback_libretro.dylib amen.wav
 
 # windows
-retroArch -L testaudio_no_callback_libretro.dll
+retroArch -L testaudio_no_callback_libretro.dll amen.ogg
 
 # linux
-retroArch -L testaudio_no_callback_libretro.so
+retroArch -L testaudio_no_callback_libretro.so amen.flac
 ```

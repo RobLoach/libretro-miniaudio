@@ -7,12 +7,9 @@
 
 #include "libretro.h"
 
-#ifdef __APPLE__
-#define MA_NO_RUNTIME_LINKING
-#endif
-#define MA_NO_DEVICE_IO
-#define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#define LIBRETRO_MINIAUDIO_OGG
+#define LIBRETRO_MINIAUDIO_IMPLEMENTATION
+#include "libretro-miniaudio.h"
 
 static uint32_t* frame_buf;
 static struct retro_log_callback logging;
@@ -45,10 +42,10 @@ void retro_set_controller_port_device(unsigned port, unsigned device) {
 
 void retro_get_system_info(struct retro_system_info* info) {
   memset(info, 0, sizeof(*info));
-  info->library_name = "TestCore";
-  info->library_version = "v1";
+  info->library_name = "libretro-miniaudio";
+  info->library_version = "0.0.1";
   info->need_fullpath = false;
-  info->valid_extensions = NULL;  // Anything is fine, we don't care.
+  info->valid_extensions = "wav|flac|mp3|ogg";
 }
 
 static retro_video_refresh_t video_cb;
@@ -79,7 +76,7 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 void retro_set_environment(retro_environment_t cb) {
   environ_cb = cb;
 
-  bool no_content = true;
+  bool no_content = false;
   cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_content);
 
   if (cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging)) {
@@ -111,8 +108,6 @@ void retro_set_video_refresh(retro_video_refresh_t cb) {
 
 static unsigned x_coord;
 static unsigned y_coord;
-static int mouse_rel_x;
-static int mouse_rel_y;
 
 void retro_reset(void) {
   x_coord = 0;
@@ -121,8 +116,6 @@ void retro_reset(void) {
 
 static void update_input(void) {
   input_poll_cb();
-  if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP)) {
-  }
 }
 
 static void render_checkered(void) {
@@ -141,39 +134,19 @@ static void render_checkered(void) {
     }
   }
 
-  for (unsigned y = mouse_rel_y - 5; y <= mouse_rel_y + 5; y++) {
-    for (unsigned x = mouse_rel_x - 5; x <= mouse_rel_x + 5; x++) {
-      buf[y * stride + x] = 0xff;
-    }
-  }
-
   video_cb(buf, 320, 240, stride << 2);
 }
 
 static void check_variables(void) {
 }
 
-static ma_engine g_engine;
-static ma_sound g_sound;
-
-#define AUDIO_FRAMES_PER_RUN (48000 / 60)
-static float audio_buf_f32[AUDIO_FRAMES_PER_RUN * 2];
-static int16_t audio_buf_s16[AUDIO_FRAMES_PER_RUN * 2];
+static libretro_miniaudio_sound g_sound;
 
 void retro_run(void) {
   update_input();
   render_checkered();
 
-  ma_engine_read_pcm_frames(&g_engine, audio_buf_f32, AUDIO_FRAMES_PER_RUN, NULL);
-
-  for (size_t i = 0; i < AUDIO_FRAMES_PER_RUN * 2; i++) {
-    float s = audio_buf_f32[i];
-    if (s > 1.0f) s = 1.0f;
-    else if (s < -1.0f) s = -1.0f;
-    audio_buf_s16[i] = (int16_t)(s * 32767.0f);
-  }
-
-  audio_batch_cb(audio_buf_s16, AUDIO_FRAMES_PER_RUN);
+  libretro_miniaudio_run(audio_batch_cb);
 
   bool updated = false;
   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
@@ -190,34 +163,32 @@ bool retro_load_game(const struct retro_game_info* info) {
 
   check_variables();
 
-  ma_result result;
-  ma_engine_config engineConfig = ma_engine_config_init();
-
-  engineConfig = ma_engine_config_init();
-  engineConfig.noDevice = MA_TRUE;
-  engineConfig.channels = 2;
-  engineConfig.sampleRate = 48000;
-
-  result = ma_engine_init(&engineConfig, &g_engine);
-  if (result != MA_SUCCESS) {
-    log_cb(RETRO_LOG_ERROR, "Failed to initialize audio engine.");
+  if (!info || !info->data || info->size == 0) {
+    log_cb(RETRO_LOG_ERROR, "No content provided; launch with an audio file as content.\n");
     return false;
   }
 
-  result = ma_sound_init_from_file(&g_engine, "amen.wav", 0, NULL, NULL, &g_sound);
-  if (result != MA_SUCCESS) {
-    log_cb(RETRO_LOG_ERROR, "Failed to initialize sound file.");
+  libretro_miniaudio_config audio_cfg = libretro_miniaudio_config_default();
+  audio_cfg.log_cb = log_cb;
+  if (!libretro_miniaudio_init(&audio_cfg)) {
     return false;
   }
 
-  ma_sound_set_looping(&g_sound, MA_TRUE);
-  ma_sound_start(&g_sound);
+  if (!libretro_miniaudio_sound_load_from_memory(&g_sound, info->data, info->size, info->path)) {
+    log_cb(RETRO_LOG_ERROR, "Failed to initialize sound from content data.\n");
+    libretro_miniaudio_uninit();
+    return false;
+  }
 
-  (void)info;
+  libretro_miniaudio_sound_set_looping(&g_sound, true);
+  libretro_miniaudio_sound_play(&g_sound);
+
   return true;
 }
 
 void retro_unload_game(void) {
+  libretro_miniaudio_sound_unload(&g_sound);
+  libretro_miniaudio_uninit();
 }
 
 unsigned retro_get_region(void) {
@@ -225,37 +196,18 @@ unsigned retro_get_region(void) {
 }
 
 bool retro_load_game_special(unsigned type, const struct retro_game_info* info, size_t num) {
-  if (type != 0x200) {
-    return false;
-  }
-  if (num != 2) {
-    return false;
-  }
-  return retro_load_game(NULL);
+  return retro_load_game(info);
 }
 
 size_t retro_serialize_size(void) {
-  return 2;
+  return 0;
 }
 
 bool retro_serialize(void* data_, size_t size) {
-  if (size < 2) {
-    return false;
-  }
-  uint8_t* data = data_;
-  data[0] = x_coord;
-  data[1] = y_coord;
   return true;
 }
 
 bool retro_unserialize(const void* data_, size_t size) {
-  if (size < 2) {
-    return false;
-  }
-
-  const uint8_t* data = data_;
-  x_coord = data[0] & 31;
-  y_coord = data[1] & 31;
   return true;
 }
 

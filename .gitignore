@@ -6,3 +6,8 @@
 
 # Typical CMake build directory.
 /build
+
+*.so
+*.ogg
+*.mp3
+*.flac

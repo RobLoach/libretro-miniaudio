@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.0.2...3.16.3)
 
 option(BUILD_SHARED_LIBS "Create a shared library instead of a static library." ON)
 
-project(skeleton_libretro LANGUAGES C)
+project(miniaudio_libretro LANGUAGES C)
 
 # Sources.
-add_library(skeleton_libretro
+add_library(miniaudio_libretro
 	"libretro.c"
 )
 
@@ -17,7 +17,7 @@ add_library(skeleton_libretro
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include libretro-common, so that 'libretro.h' can be found.
-target_include_directories(skeleton_libretro PRIVATE "libretro-common/include")
+target_include_directories(skeleton_libretro PRIVATE "libretro-common/include" "include" ".")
 
 # Provide an 'stdint.h' for older versions of MSVC.
 if(MSVC AND MSVC_VERSION LESS 1600)
