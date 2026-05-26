@@ -1,6 +1,8 @@
-*.dylib
-*.dll
-*.so
-*.o
-*.a
-.DS_Store
+# Object file.
+/*.o
+
+# Built libretro core.
+/skeleton_libretro.*
+
+# Typical CMake build directory.
+/build

@@ -155,14 +155,25 @@ static void check_variables(void) {
 
 static ma_engine g_engine;
 static ma_sound g_sound;
-static ma_uint8* pBuffer[48000 * 2];
+
+#define AUDIO_FRAMES_PER_RUN (48000 / 60)
+static float audio_buf_f32[AUDIO_FRAMES_PER_RUN * 2];
+static int16_t audio_buf_s16[AUDIO_FRAMES_PER_RUN * 2];
 
 void retro_run(void) {
   update_input();
   render_checkered();
 
-  ma_engine_read_pcm_frames(&g_engine, pBuffer, 48000 / 30, NULL);
-  audio_batch_cb((int16_t*)pBuffer, 48000 / 60);
+  ma_engine_read_pcm_frames(&g_engine, audio_buf_f32, AUDIO_FRAMES_PER_RUN, NULL);
+
+  for (size_t i = 0; i < AUDIO_FRAMES_PER_RUN * 2; i++) {
+    float s = audio_buf_f32[i];
+    if (s > 1.0f) s = 1.0f;
+    else if (s < -1.0f) s = -1.0f;
+    audio_buf_s16[i] = (int16_t)(s * 32767.0f);
+  }
+
+  audio_batch_cb(audio_buf_s16, AUDIO_FRAMES_PER_RUN);
 
   bool updated = false;
   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
