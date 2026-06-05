@@ -1,12 +1,12 @@
 # libretro-miniaudio
 
-[miniaudio](https://miniaud.io/) audio playback for [libretro](https://www.libretro.com/) cores via a single-header C library.
+[miniaudio](https://miniaud.io/) audio playback for [libretro](https://www.libretro.com/) cores via a header-only C library.
 
 ## Features
 
 - **WAV**, **MP3**, and **FLAC** support out of the box
 - **OGG** support via `#define LIBRETRO_MINIAUDIO_OGG` (uses stb_vorbis)
-- Single-header, no external build dependencies
+- No external build dependencies
 - Drives audio through the libretro `retro_audio_sample_batch_t` callback
 
 ## Usage
@@ -65,28 +65,21 @@ void retro_unload_game(void) {
 
 ## API
 
-### Engine
-
-| Function | Description |
-|---|---|
-| `libretro_miniaudio_config libretro_miniaudio_config_default(void)` | Returns a config with default values (48000 Hz, 2 ch, 60 fps). |
-| `bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg)` | Initialises the audio engine. Call once in `retro_load_game`. |
-| `void libretro_miniaudio_uninit(void)` | Shuts down the engine and frees resources. |
-| `void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb)` | Mixes and submits one frame of audio. Call every `retro_run`. |
-| `ma_engine* libretro_miniaudio_engine(void)` | Returns the underlying `ma_engine*` for advanced miniaudio use. |
-
-### Sounds
-
-| Function | Description |
-|---|---|
-| `bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path)` | Loads a sound from a file path. |
-| `bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name)` | Loads a sound from a memory buffer. |
-| `void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound)` | Unloads and frees a sound. |
-| `void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound)` | Starts playback. |
-| `void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound)` | Stops playback. |
-| `void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop)` | Enables or disables looping. |
-| `void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume)` | Sets volume (0.0 to 1.0). |
-| `bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound)` | Returns true if the sound is currently playing. |
+```c
+libretro_miniaudio_config libretro_miniaudio_config_default(void);
+bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
+void libretro_miniaudio_uninit(void);
+void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
+ma_engine* libretro_miniaudio_engine(void);
+bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path);
+bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
+void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound);
+void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound);
+void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound);
+void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop);
+void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume);
+bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
+```
 
 ## Building
 
@@ -109,8 +102,6 @@ retroarch -L testaudio_no_callback_libretro.so amen.flac
 
 ## License
 
-libretro-miniaudio is licensed under the [MIT License](https://opensource.org/licenses/MIT).
-
-[miniaudio](https://miniaud.io/) is licensed under MIT-0 or Public Domain (your choice).
-
-[stb_vorbis](https://github.com/nothings/stb) (used for OGG support) is public domain.
+- libretro-miniaudio is licensed under the [MIT License](https://opensource.org/licenses/MIT)
+- [miniaudio](https://miniaud.io/) is licensed under MIT-0 or Public Domain (your choice)
+- [stb_vorbis](https://github.com/nothings/stb) (used for OGG support) is public domain
