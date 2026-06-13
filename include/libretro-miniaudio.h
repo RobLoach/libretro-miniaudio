@@ -47,6 +47,8 @@ void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop);
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume);
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
+void libretro_miniaudio_set_master_volume(float volume);
+float libretro_miniaudio_get_master_volume(void);
 const char* libretro_miniaudio_version(void);
 
 #ifdef __cplusplus
@@ -377,6 +379,20 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) 
       return false;
    }
    return ma_sound_is_playing(sound) == MA_TRUE;
+}
+
+void libretro_miniaudio_set_master_volume(float volume) {
+   if (!g_libretro_miniaudio.initialized) {
+      return;
+   }
+   ma_engine_set_volume(&g_libretro_miniaudio.engine, volume);
+}
+
+float libretro_miniaudio_get_master_volume(void) {
+   if (!g_libretro_miniaudio.initialized) {
+      return 1.0f;
+   }
+   return ma_engine_get_volume(&g_libretro_miniaudio.engine);
 }
 
 const char* libretro_miniaudio_version(void) {
