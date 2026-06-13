@@ -17,30 +17,30 @@ add_library(miniaudio_libretro
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include libretro-common, so that 'libretro.h' can be found.
-target_include_directories(skeleton_libretro PRIVATE "libretro-common/include" "include" ".")
+target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include" "include" ".")
 
 # Provide an 'stdint.h' for older versions of MSVC.
 if(MSVC AND MSVC_VERSION LESS 1600)
-	target_include_directories(skeleton_libretro PRIVATE "libretro-common/include/compat/msvc")
+	target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include/compat/msvc")
 endif()
 
 # Give the code a way of determining that it is targeting libretro.
-target_compile_definitions(skeleton_libretro PRIVATE __LIBRETRO__)
+target_compile_definitions(miniaudio_libretro PRIVATE __LIBRETRO__)
 
 # Allow only the libretro API functions to be exported.
-set_target_properties(skeleton_libretro PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+set_target_properties(miniaudio_libretro PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 # Adjust the library's filename. This is relied upon by libretro's CI infrastructure.
 
 # Remove the 'lib' prefix.
-set_target_properties(skeleton_libretro PROPERTIES PREFIX "")
+set_target_properties(miniaudio_libretro PROPERTIES PREFIX "")
 
 # Append the given suffix.
-set_target_properties(skeleton_libretro PROPERTIES OUTPUT_NAME "skeleton_libretro${LIBRETRO_SUFFIX}")
+set_target_properties(miniaudio_libretro PROPERTIES OUTPUT_NAME "miniaudio_libretro${LIBRETRO_SUFFIX}")
 
 # Emscripten builds are expected to use the '.bc' file extension instead of '.a'.
 if(LIBRETRO_STATIC AND EMSCRIPTEN)
-	set_target_properties(skeleton_libretro PROPERTIES SUFFIX ".bc")
+	set_target_properties(miniaudio_libretro PROPERTIES SUFFIX ".bc")
 endif()
 
 # Obtain the Git revision so that it can be displayed in the core's version string.
@@ -52,6 +52,6 @@ if(GIT_FOUND)
 		OUTPUT_STRIP_TRAILING_WHITESPACE
 	)
 	if(GIT_VERSION)
-		target_compile_definitions(skeleton_libretro PRIVATE GIT_VERSION=" ${GIT_VERSION}")
+		target_compile_definitions(miniaudio_libretro PRIVATE GIT_VERSION=" ${GIT_VERSION}")
 	endif()
 endif()
