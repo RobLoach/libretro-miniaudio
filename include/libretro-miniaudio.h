@@ -396,6 +396,8 @@ float libretro_miniaudio_get_master_volume(void) {
       return 1.0f;
    }
    return ma_engine_get_volume(&g_libretro_miniaudio.engine);
+}
+
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index) {
    if (sound) {
       ma_sound_seek_to_pcm_frame(sound, (ma_uint64)frame_index);
