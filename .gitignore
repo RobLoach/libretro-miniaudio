@@ -2,7 +2,7 @@
 /*.o
 
 # Built libretro core.
-/skeleton_libretro.*
+/miniaudio_libretro.*
 
 # Typical CMake build directory.
 /build
