@@ -49,6 +49,9 @@ void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float 
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
 void libretro_miniaudio_set_master_volume(float volume);
 float libretro_miniaudio_get_master_volume(void);
+void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
+uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
+uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
 const char* libretro_miniaudio_version(void);
 
 #ifdef __cplusplus
@@ -393,6 +396,26 @@ float libretro_miniaudio_get_master_volume(void) {
       return 1.0f;
    }
    return ma_engine_get_volume(&g_libretro_miniaudio.engine);
+void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index) {
+   if (sound) {
+      ma_sound_seek_to_pcm_frame(sound, (ma_uint64)frame_index);
+   }
+}
+
+uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound) {
+   ma_uint64 cursor = 0;
+   if (sound) {
+      ma_sound_get_cursor_in_pcm_frames(sound, &cursor);
+   }
+   return (uint64_t)cursor;
+}
+
+uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound) {
+   ma_uint64 length = 0;
+   if (sound) {
+      ma_sound_get_length_in_pcm_frames(sound, &length);
+   }
+   return (uint64_t)length;
 }
 
 const char* libretro_miniaudio_version(void) {

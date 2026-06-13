@@ -43,7 +43,11 @@ void retro_set_controller_port_device(unsigned port, unsigned device) {
 void retro_get_system_info(struct retro_system_info* info) {
   memset(info, 0, sizeof(*info));
   info->library_name = "libretro-miniaudio";
+#ifdef GIT_VERSION
+  info->library_version = "0.0.1" GIT_VERSION;
+#else
   info->library_version = "0.0.1";
+#endif
   info->need_fullpath = false;
   info->valid_extensions = "wav|flac|mp3|ogg";
 }
