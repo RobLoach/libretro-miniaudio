@@ -25,6 +25,19 @@ In all other files just include the header:
 #include "libretro-miniaudio.h"
 ```
 
+## Configuration
+
+`libretro_miniaudio_config_default()` returns a config struct you can customize before passing to `libretro_miniaudio_init()`:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `sample_rate` | `uint32_t` | `48000` | Output sample rate in Hz |
+| `channels` | `uint32_t` | `2` | 1 for mono, 2 for stereo |
+| `fps` | `double` | `60.0` | Must match `retro_system_timing.fps` |
+| `log_cb` | `retro_log_printf_t` | `NULL` | Optional libretro log callback |
+
+`fps` controls how many frames of audio are mixed per `retro_run()` call, so a mismatch causes buffer underruns or overruns. Cores running at non-standard rates (50 Hz PAL, 75 Hz arcade) should set this to match.
+
 ## Example
 
 ```c
