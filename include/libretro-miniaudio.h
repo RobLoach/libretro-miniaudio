@@ -19,6 +19,14 @@
 #include <stdint.h>
 
 #include "libretro.h"
+
+// MiniAudio Configuration
+#define MA_NO_RUNTIME_LINKING
+#define MA_NO_DEVICE_IO
+#define MA_NO_THREADING
+#define MA_NO_GENERATION
+#define MA_NO_ENCODING
+
 #include "miniaudio.h"
 
 #ifdef __cplusplus
@@ -39,7 +47,6 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
 void libretro_miniaudio_uninit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
-bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path);
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound);
@@ -47,6 +54,7 @@ void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop);
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume);
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
+bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
 void libretro_miniaudio_set_master_volume(float volume);
 float libretro_miniaudio_get_master_volume(void);
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
@@ -64,9 +72,6 @@ const char* libretro_miniaudio_version(void);
 #ifndef LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
 #define LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
 
-#define MA_NO_RUNTIME_LINKING
-#define MA_NO_DEVICE_IO
-
 #ifdef LIBRETRO_MINIAUDIO_OGG
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
@@ -83,13 +88,22 @@ const char* libretro_miniaudio_version(void);
 #include <stdlib.h>
 #include <string.h>
 
+#define LIBRETRO_MINIAUDIO_MAX_COPIES 64
+
+typedef struct libretro_miniaudio_copy_entry {
+   ma_sound* sound;
+   char      name[24];
+   void*     data;
+} libretro_miniaudio_copy_entry;
+
 typedef struct libretro_miniaudio_state {
-   bool                      initialized;
-   libretro_miniaudio_config cfg;
-   ma_engine                 engine;
-   uint32_t                  frames_per_run;
-   float*                    buf_f32;
-   int16_t*                  buf_s16;
+   bool                           initialized;
+   libretro_miniaudio_config      cfg;
+   ma_engine                      engine;
+   uint32_t                       frames_per_run;
+   float*                         buf_f32;
+   int16_t*                       buf_s16;
+   libretro_miniaudio_copy_entry  copies[LIBRETRO_MINIAUDIO_MAX_COPIES];
 } libretro_miniaudio_state;
 
 static libretro_miniaudio_state g_libretro_miniaudio;
@@ -179,8 +193,30 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
  * Safe to call when not initialized. After this returns the engine state is
  * fully reset and libretro_miniaudio_init() may be called again.
  */
+static void libretro_miniaudio_copy_free(ma_sound* sound) {
+   int i;
+   ma_resource_manager* rm;
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_COPIES; ++i) {
+      if (g_libretro_miniaudio.copies[i].sound == sound) {
+         rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
+         if (rm) {
+            ma_resource_manager_unregister_data(rm, g_libretro_miniaudio.copies[i].name);
+         }
+         free(g_libretro_miniaudio.copies[i].data);
+         memset(&g_libretro_miniaudio.copies[i], 0, sizeof(g_libretro_miniaudio.copies[i]));
+         break;
+      }
+   }
+}
+
 void libretro_miniaudio_uninit(void) {
+   int i;
    if (g_libretro_miniaudio.initialized) {
+      for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_COPIES; ++i) {
+         if (g_libretro_miniaudio.copies[i].data) {
+            free(g_libretro_miniaudio.copies[i].data);
+         }
+      }
       ma_engine_uninit(&g_libretro_miniaudio.engine);
    }
    free(g_libretro_miniaudio.buf_f32);
@@ -228,20 +264,6 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
  */
 ma_engine* libretro_miniaudio_engine(void) {
    return &g_libretro_miniaudio.engine;
-}
-
-/**
- * @brief Loads an encoded audio asset from a file path.
- *
- * @param sound Caller-allocated sound handle to populate.
- * @param path  Filesystem path to a supported audio file (wav/flac/mp3/etc.).
- * @return true on success, false if the engine is not initialized or loading fails.
- */
-bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path) {
-   if (!sound || !path || !g_libretro_miniaudio.initialized) {
-      return false;
-   }
-   return ma_sound_init_from_file(&g_libretro_miniaudio.engine, path, 0, NULL, NULL, sound) == MA_SUCCESS;
 }
 
 /**
@@ -321,6 +343,7 @@ bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, 
  */
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
    if (sound) {
+      libretro_miniaudio_copy_free(sound);
       ma_sound_uninit(sound);
    }
 }
@@ -382,6 +405,76 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) 
       return false;
    }
    return ma_sound_is_playing(sound) == MA_TRUE;
+}
+
+bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name) {
+   static const char    hex[] = "0123456789abcdef";
+   ma_resource_manager* rm;
+   void*                data_copy;
+   uintptr_t            ptr;
+   char                 auto_name[24];
+   const char*          reg_name;
+   size_t               i;
+   ma_result            r;
+   int                  slot;
+
+   if (!sound || !data || size == 0 || !g_libretro_miniaudio.initialized) {
+      return false;
+   }
+
+   slot = -1;
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_COPIES; ++i) {
+      if (!g_libretro_miniaudio.copies[i].sound) {
+         slot = (int)i;
+         break;
+      }
+   }
+   if (slot < 0) {
+      return false;
+   }
+
+   data_copy = malloc(size);
+   if (!data_copy) {
+      return false;
+   }
+   memcpy(data_copy, data, size);
+
+   rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
+   if (!rm) {
+      free(data_copy);
+      return false;
+   }
+
+   if (name && name[0]) {
+      reg_name = name;
+   } else {
+      ptr          = (uintptr_t)data_copy;
+      auto_name[0] = 'l'; auto_name[1] = 'r'; auto_name[2] = 'm'; auto_name[3] = '_';
+      for (i = 0; i < 16; ++i) {
+         auto_name[4 + 15 - i] = hex[ptr & 0xf];
+         ptr >>= 4;
+      }
+      auto_name[20] = '\0';
+      reg_name      = auto_name;
+   }
+
+   if (ma_resource_manager_register_encoded_data(rm, reg_name, data_copy, size) != MA_SUCCESS) {
+      free(data_copy);
+      return false;
+   }
+
+   r = ma_sound_init_from_file(&g_libretro_miniaudio.engine, reg_name, 0, NULL, NULL, sound);
+   if (r != MA_SUCCESS) {
+      ma_resource_manager_unregister_data(rm, reg_name);
+      free(data_copy);
+      return false;
+   }
+
+   g_libretro_miniaudio.copies[slot].sound = sound;
+   strncpy(g_libretro_miniaudio.copies[slot].name, reg_name, sizeof(g_libretro_miniaudio.copies[slot].name) - 1);
+   g_libretro_miniaudio.copies[slot].name[sizeof(g_libretro_miniaudio.copies[slot].name) - 1] = '\0';
+   g_libretro_miniaudio.copies[slot].data  = data_copy;
+   return true;
 }
 
 void libretro_miniaudio_set_master_volume(float volume) {
