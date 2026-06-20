@@ -19,6 +19,14 @@
 #include <stdint.h>
 
 #include "libretro.h"
+
+// MiniAudio Configuration
+#define MA_NO_RUNTIME_LINKING
+#define MA_NO_DEVICE_IO
+#define MA_NO_THREADING
+#define MA_NO_GENERATION
+#define MA_NO_ENCODING
+
 #include "miniaudio.h"
 
 #ifdef __cplusplus
@@ -39,7 +47,6 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
 void libretro_miniaudio_uninit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
-bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path);
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound);
@@ -64,9 +71,6 @@ const char* libretro_miniaudio_version(void);
 #ifdef LIBRETRO_MINIAUDIO_IMPLEMENTATION
 #ifndef LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
 #define LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
-
-#define MA_NO_RUNTIME_LINKING
-#define MA_NO_DEVICE_IO
 
 #ifdef LIBRETRO_MINIAUDIO_OGG
 #define STB_VORBIS_HEADER_ONLY
@@ -260,20 +264,6 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
  */
 ma_engine* libretro_miniaudio_engine(void) {
    return &g_libretro_miniaudio.engine;
-}
-
-/**
- * @brief Loads an encoded audio asset from a file path.
- *
- * @param sound Caller-allocated sound handle to populate.
- * @param path  Filesystem path to a supported audio file (wav/flac/mp3/etc.).
- * @return true on success, false if the engine is not initialized or loading fails.
- */
-bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path) {
-   if (!sound || !path || !g_libretro_miniaudio.initialized) {
-      return false;
-   }
-   return ma_sound_init_from_file(&g_libretro_miniaudio.engine, path, 0, NULL, NULL, sound) == MA_SUCCESS;
 }
 
 /**

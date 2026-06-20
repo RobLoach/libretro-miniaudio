@@ -64,7 +64,7 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
   float sampling_rate = 48000.0f;
 
   info->timing = (struct retro_system_timing){
-      .fps = 60.0,
+      .fps = 30.0,
       .sample_rate = sampling_rate,
   };
 
