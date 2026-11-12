@@ -215,18 +215,41 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
 }
 
 /**
+ * @brief Uninitializes the tracked sound in the given slot and drops its
+ *        resource manager registration. The slot's data copy is not freed.
+ */
+static void libretro_miniaudio_sound_release(int i) {
+   ma_resource_manager* rm;
+   ma_sound_uninit(g_libretro_miniaudio.sounds[i].sound);
+   rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
+   if (rm) {
+      ma_resource_manager_unregister_data(rm, g_libretro_miniaudio.sounds[i].name);
+   }
+}
+
+/**
  * @brief Tears down the audio engine and releases its internal buffers.
  *
- * Safe to call when not initialized. After this returns the engine state is
- * fully reset and libretro_miniaudio_init() may be called again.
+ * Any sounds still loaded are uninitialized first, so calling
+ * libretro_miniaudio_sound_unload() beforehand is optional; unloading them
+ * afterwards is a no-op. Safe to call when not initialized. After this returns
+ * the engine state is fully reset and libretro_miniaudio_init() may be called
+ * again.
  */
 void libretro_miniaudio_uninit(void) {
    int i;
    if (g_libretro_miniaudio.initialized) {
-      /* Uninitializing the engine also uninitializes its resource manager,
-       * which deletes every registered data buffer node. Nodes registered from
-       * existing memory never own or free that memory, so the tracked data
-       * copies are only released once nothing can reference them. */
+      /* Sounds must be uninitialized while the engine, node graph and resource
+       * manager they reference are still alive. */
+      for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+         if (g_libretro_miniaudio.sounds[i].sound) {
+            libretro_miniaudio_sound_release(i);
+         }
+      }
+      /* Uninitializing the engine also uninitializes its resource manager.
+       * Nodes registered from existing memory never own or free that memory,
+       * so the tracked data copies are only released once nothing can
+       * reference them. */
       ma_engine_uninit(&g_libretro_miniaudio.engine);
       for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
          free(g_libretro_miniaudio.sounds[i].data);
@@ -396,24 +419,22 @@ bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, 
  * The sound is uninitialized first, then its resource manager registration is
  * dropped and any data copy owned by the wrapper is freed.
  *
- * @param sound Sound handle to release. NULL is tolerated and treated as a no-op.
+ * Only sounds currently tracked by the wrapper are touched, so this is a safe
+ * no-op for NULL, a sound that was never loaded (or failed to load), a sound
+ * that was already unloaded, or any sound after libretro_miniaudio_uninit().
+ *
+ * @param sound Sound handle to release.
  */
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
-   int                  i;
-   ma_resource_manager* rm;
+   int i;
 
    if (!sound) {
       return;
    }
 
-   ma_sound_uninit(sound);
-
    for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
       if (g_libretro_miniaudio.sounds[i].sound == sound) {
-         rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
-         if (rm && g_libretro_miniaudio.initialized) {
-            ma_resource_manager_unregister_data(rm, g_libretro_miniaudio.sounds[i].name);
-         }
+         libretro_miniaudio_sound_release(i);
          free(g_libretro_miniaudio.sounds[i].data);
          memset(&g_libretro_miniaudio.sounds[i], 0, sizeof(g_libretro_miniaudio.sounds[i]));
          break;
@@ -427,7 +448,7 @@ void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
  * @param sound Sound handle to play. NULL is tolerated and treated as a no-op.
  */
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_start(sound);
    }
 }
@@ -438,7 +459,7 @@ void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
  * @param sound Sound handle to stop. NULL is tolerated and treated as a no-op.
  */
 void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound) {
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_stop(sound);
    }
 }
@@ -450,7 +471,7 @@ void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound) {
  * @param loop  true to loop on completion, false to play once.
  */
 void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop) {
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_set_looping(sound, loop ? MA_TRUE : MA_FALSE);
    }
 }
@@ -462,7 +483,7 @@ void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool 
  * @param volume Linear gain (1.0 = unity, 0.0 = silence, > 1.0 amplifies).
  */
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume) {
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_set_volume(sound, volume);
    }
 }
@@ -474,7 +495,7 @@ void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float 
  * @return true if the sound is non-NULL and currently playing, false otherwise.
  */
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) {
-   if (!sound) {
+   if (!sound || !g_libretro_miniaudio.initialized) {
       return false;
    }
    return ma_sound_is_playing(sound) == MA_TRUE;
@@ -499,14 +520,14 @@ float libretro_miniaudio_get_master_volume(void) {
 }
 
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index) {
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_seek_to_pcm_frame(sound, (ma_uint64)frame_index);
    }
 }
 
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound) {
    ma_uint64 cursor = 0;
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_get_cursor_in_pcm_frames(sound, &cursor);
    }
    return (uint64_t)cursor;
@@ -514,7 +535,7 @@ uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* s
 
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound) {
    ma_uint64 length = 0;
-   if (sound) {
+   if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_get_length_in_pcm_frames(sound, &length);
    }
    return (uint64_t)length;
