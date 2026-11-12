@@ -86,6 +86,7 @@ const char* libretro_miniaudio_version(void);
 #endif /* LIBRETRO_MINIAUDIO_OGG */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifndef LIBRETRO_MINIAUDIO_MAX_SOUNDS
@@ -96,8 +97,8 @@ const char* libretro_miniaudio_version(void);
  * under exactly the name it was registered with, and free any owned copy. */
 typedef struct libretro_miniaudio_sound_entry {
    ma_sound* sound;
-   char*     name;  /* heap copy of the registered name */
-   void*     data;  /* owned copy of the encoded data, or NULL */
+   char      name[24];  /* unique internal registration name */
+   void*     data;      /* owned copy of the encoded data, or NULL */
 } libretro_miniaudio_sound_entry;
 
 typedef struct libretro_miniaudio_state {
@@ -109,6 +110,7 @@ typedef struct libretro_miniaudio_state {
    double                         frames_accum;        /* carried fractional remainder */
    float*                         buf_f32;
    int16_t*                       buf_s16;
+   uint32_t                       load_counter;        /* makes registration names unique */
    libretro_miniaudio_sound_entry sounds[LIBRETRO_MINIAUDIO_MAX_SOUNDS];
 } libretro_miniaudio_state;
 
@@ -223,11 +225,10 @@ void libretro_miniaudio_uninit(void) {
    if (g_libretro_miniaudio.initialized) {
       /* Uninitializing the engine also uninitializes its resource manager,
        * which deletes every registered data buffer node. Nodes registered from
-       * existing memory never own or free that memory, so the tracked names
-       * and data copies are only released once nothing can reference them. */
+       * existing memory never own or free that memory, so the tracked data
+       * copies are only released once nothing can reference them. */
       ma_engine_uninit(&g_libretro_miniaudio.engine);
       for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
-         free(g_libretro_miniaudio.sounds[i].name);
          free(g_libretro_miniaudio.sounds[i].data);
       }
    }
@@ -298,15 +299,10 @@ ma_engine* libretro_miniaudio_engine(void) {
  * @param copy When true, the data is duplicated and owned by the wrapper.
  */
 static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name, bool copy) {
-   static const char    hex[] = "0123456789abcdef";
    ma_resource_manager* rm;
    void*                data_copy;
    const void*          reg_data;
-   uintptr_t            ptr;
-   char                 auto_name[24];
-   const char*          src_name;
    char*                reg_name;
-   size_t               name_len;
    size_t               i;
    ma_result            r;
    int                  slot;
@@ -346,32 +342,13 @@ static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sou
       reg_data = data_copy;
    }
 
-   if (name && name[0]) {
-      src_name = name;
-   } else {
-      /* Derive a stable virtual name from the data pointer (no stdio needed).
-       * Loading the same buffer twice will refcount on the same registration. */
-      ptr          = (uintptr_t)reg_data;
-      auto_name[0] = 'l'; auto_name[1] = 'r'; auto_name[2] = 'm'; auto_name[3] = '_';
-      for (i = 0; i < 16; ++i) {
-         auto_name[4 + 15 - i] = hex[ptr & 0xf];
-         ptr >>= 4;
-      }
-      auto_name[20] = '\0';
-      src_name      = auto_name;
-   }
-
-   /* Keep an exact copy of the name so unload unregisters the same name. */
-   name_len = strlen(src_name);
-   reg_name = (char*)malloc(name_len + 1);
-   if (!reg_name) {
-      free(data_copy);
-      return false;
-   }
-   memcpy(reg_name, src_name, name_len + 1);
+   /* Register under a unique internal name. Sharing a name would make the
+    * resource manager reuse the first registration and ignore this buffer,
+    * so the caller's name is only used for logging. */
+   reg_name = g_libretro_miniaudio.sounds[slot].name;
+   sprintf(reg_name, "lrm_%x_%lx", (unsigned)slot, (unsigned long)g_libretro_miniaudio.load_counter++);
 
    if (ma_resource_manager_register_encoded_data(rm, reg_name, reg_data, size) != MA_SUCCESS) {
-      free(reg_name);
       free(data_copy);
       return false;
    }
@@ -383,16 +360,14 @@ static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sou
           * (e.g. an Ogg with a Skeleton stream stb_vorbis can't parse) from I/O
           * failures. */
          g_libretro_miniaudio.cfg.log_cb(RETRO_LOG_ERROR,
-            "[libretro-miniaudio] ma_sound_init_from_file('%s') failed: %d.\n", reg_name, (int)r);
+            "[libretro-miniaudio] ma_sound_init_from_file('%s') failed: %d.\n", (name && name[0]) ? name : reg_name, (int)r);
       }
       ma_resource_manager_unregister_data(rm, reg_name);
-      free(reg_name);
       free(data_copy);
       return false;
    }
 
    g_libretro_miniaudio.sounds[slot].sound = sound;
-   g_libretro_miniaudio.sounds[slot].name  = reg_name;
    g_libretro_miniaudio.sounds[slot].data  = data_copy;
    return true;
 }
@@ -402,16 +377,13 @@ static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sou
  *
  * The buffer is NOT copied; it must remain valid for the lifetime of the
  * engine. Useful for sounds embedded in the core via xxd / incbin /
- * build-time blobs. Loading the same buffer twice refcounts on the same
- * registration inside the resource manager.
+ * build-time blobs. Every load gets its own resource manager registration.
  *
  * @param sound Caller-allocated sound handle to populate.
  * @param data  Pointer to the encoded audio bytes. Must outlive the engine.
  * @param size  Size of the encoded buffer in bytes. Must be > 0.
- * @param name  Optional virtual path to register the buffer under (e.g.
- *              "sfx/jump.wav"). Pass NULL to auto-derive a stable name from
- *              the data pointer. Reusing the same name with the same data
- *              refcounts on the existing registration.
+ * @param name  Optional label (e.g. "sfx/jump.wav") used only in log
+ *              messages. May be NULL. Names need not be unique.
  * @return true on success, false on invalid input or load failure.
  */
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name) {
@@ -442,7 +414,6 @@ void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
          if (rm && g_libretro_miniaudio.initialized) {
             ma_resource_manager_unregister_data(rm, g_libretro_miniaudio.sounds[i].name);
          }
-         free(g_libretro_miniaudio.sounds[i].name);
          free(g_libretro_miniaudio.sounds[i].data);
          memset(&g_libretro_miniaudio.sounds[i], 0, sizeof(g_libretro_miniaudio.sounds[i]));
          break;
