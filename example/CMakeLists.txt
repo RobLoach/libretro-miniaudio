@@ -1,4 +1,4 @@
-# Built through the root CMakeLists.txt with LIBRETRO_MINIAUDIO_BUILD_TEST.
+# Built through the root CMakeLists.txt with LIBRETRO_MINIAUDIO_BUILD_EXAMPLE.
 
 option(BUILD_SHARED_LIBS "Create a shared library instead of a static library." ON)
 

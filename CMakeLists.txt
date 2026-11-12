@@ -8,7 +8,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 else()
 	set(LIBRETRO_MINIAUDIO_IS_TOP_LEVEL OFF)
 endif()
-option(LIBRETRO_MINIAUDIO_BUILD_TEST "Build the example libretro core in test/." ${LIBRETRO_MINIAUDIO_IS_TOP_LEVEL})
+option(LIBRETRO_MINIAUDIO_BUILD_EXAMPLE "Build the example libretro core in example/." ${LIBRETRO_MINIAUDIO_IS_TOP_LEVEL})
 
 ############################################
 # Header-only library.                     #
@@ -29,6 +29,6 @@ endif()
 # Example libretro core.                   #
 ############################################
 
-if(LIBRETRO_MINIAUDIO_BUILD_TEST)
-	add_subdirectory(test)
+if(LIBRETRO_MINIAUDIO_BUILD_EXAMPLE)
+	add_subdirectory(example)
 endif()

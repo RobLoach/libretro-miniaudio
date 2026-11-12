@@ -124,15 +124,15 @@ uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sou
 
 ## Building
 
-The example core lives in `test/` and needs the `libretro-common` submodule:
+The example core lives in `example/` and needs the `libretro-common` submodule:
 
 ```bash
 git submodule update --init
 
-# Make: builds test/miniaudio_libretro.so (.dylib on macOS, .dll on Windows)
-make -C test
+# Make: builds example/miniaudio_libretro.so (.dylib on macOS, .dll on Windows)
+make -C example
 
-# or CMake: builds build/test/miniaudio_libretro.so
+# or CMake: builds build/example/miniaudio_libretro.so
 cmake -S . -B build
 cmake --build build
 ```
@@ -140,7 +140,7 @@ cmake --build build
 ## Running
 
 ```bash
-retroarch -L test/miniaudio_libretro.so test/amen.wav
+retroarch -L example/miniaudio_libretro.so example/amen.wav
 ```
 
 The example core also plays OGG, FLAC and MP3 content.
