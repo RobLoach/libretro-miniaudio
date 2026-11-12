@@ -11,6 +11,15 @@
 
 ## Usage
 
+Copy `libretro-miniaudio.h`, `miniaudio.h` and `stb_vorbis.c` from the repository root into your core, add that directory and `libretro-common/include` (for `libretro.h`) to your include path, and link with `-lm`.
+
+With CMake, add this repository as a subdirectory instead:
+
+```cmake
+add_subdirectory(libretro-miniaudio)
+target_link_libraries(your_core PRIVATE libretro_miniaudio::libretro_miniaudio)
+```
+
 In exactly one `.c` file define the implementation before including:
 
 ```c
@@ -25,36 +34,46 @@ In all other files just include the header:
 #include "libretro-miniaudio.h"
 ```
 
+Up to `LIBRETRO_MINIAUDIO_MAX_SOUNDS` (default `64`) sounds can be loaded at once. Define it before the implementation to change the limit.
+
 ## Configuration
 
-`libretro_miniaudio_config_default()` returns a config struct you can customize before passing to `libretro_miniaudio_init()`:
+`libretro_miniaudio_config_default()` returns a config struct you can customize before passing to `libretro_miniaudio_init()` (passing `NULL` uses the defaults):
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `sample_rate` | `uint32_t` | `48000` | Output sample rate in Hz |
-| `channels` | `uint32_t` | `2` | 1 for mono, 2 for stereo |
-| `fps` | `double` | `60.0` | Must match `retro_system_timing.fps` |
+| `sample_rate` | `uint32_t` | `48000` | Output sample rate in Hz, must be > 0 |
+| `channels` | `uint32_t` | `2` | Must be 2, libretro takes interleaved stereo |
+| `fps` | `double` | `60.0` | Must be > 0 and match `retro_system_timing.fps` |
 | `log_cb` | `retro_log_printf_t` | `NULL` | Optional libretro log callback |
 
-`fps` controls how many frames of audio are mixed per `retro_run()` call, so a mismatch causes buffer underruns or overruns. Cores running at non-standard rates (50 Hz PAL, 75 Hz arcade) should set this to match.
+`fps` controls how many frames of audio are mixed per `retro_run()` call, so a mismatch causes buffer underruns or overruns. Cores running at non-standard rates (50 Hz PAL, 75 Hz arcade) should set this to match. When `sample_rate / fps` is not a whole number, `libretro_miniaudio_run()` carries the fractional remainder between calls.
 
 ## Example
 
 ```c
+#include "libretro.h"
+
 #define LIBRETRO_MINIAUDIO_IMPLEMENTATION
 #include "libretro-miniaudio.h"
 
+static retro_log_printf_t log_cb;              // from RETRO_ENVIRONMENT_GET_LOG_INTERFACE
+static retro_audio_sample_batch_t audio_batch_cb;
 static libretro_miniaudio_sound g_sound;
+
+void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) {
+    audio_batch_cb = cb;
+}
 
 // Called once when a game is loaded.
 bool retro_load_game(const struct retro_game_info* info) {
     libretro_miniaudio_config cfg = libretro_miniaudio_config_default();
-    cfg.log_cb = log_cb;  // optional retro_log_printf_t
+    cfg.log_cb = log_cb;
     if (!libretro_miniaudio_init(&cfg))
         return false;
 
-    // Load audio directly from in-memory content data.
-    if (!libretro_miniaudio_sound_load_from_memory(&g_sound, info->data, info->size, info->path)) {
+    // Copy the content data, as the frontend may free it after this returns.
+    if (!libretro_miniaudio_sound_load_from_memory_copy(&g_sound, info->data, info->size, info->path)) {
         libretro_miniaudio_uninit();
         return false;
     }
@@ -76,6 +95,8 @@ void retro_unload_game(void) {
 }
 ```
 
+Use `libretro_miniaudio_sound_load_from_memory()` only when the data outlives the sound.
+
 ## API
 
 ```c
@@ -84,34 +105,45 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
 void libretro_miniaudio_uninit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
-bool libretro_miniaudio_sound_load(libretro_miniaudio_sound* sound, const char* path);
+void libretro_miniaudio_set_master_volume(float volume);
+float libretro_miniaudio_get_master_volume(void);
+const char* libretro_miniaudio_version(void);
+
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
+bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop);
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume);
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
+void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
+uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
+uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
 ```
 
 ## Building
 
-```
-make
+The example core lives in `test/` and needs the `libretro-common` submodule:
+
+```bash
+git submodule update --init
+
+# Make: builds test/miniaudio_libretro.so (.dylib on macOS, .dll on Windows)
+make -C test
+
+# or CMake: builds build/test/miniaudio_libretro.so
+cmake -S . -B build
+cmake --build build
 ```
 
 ## Running
 
 ```bash
-# macOS
-/Applications/RetroArch.app/Contents/MacOS/RetroArch -L testaudio_no_callback_libretro.dylib amen.wav
-
-# Windows
-retroarch -L testaudio_no_callback_libretro.dll amen.ogg
-
-# Linux
-retroarch -L testaudio_no_callback_libretro.so amen.flac
+retroarch -L test/miniaudio_libretro.so test/amen.wav
 ```
+
+The example core also plays OGG, FLAC and MP3 content.
 
 ## License
 
