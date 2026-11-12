@@ -9,6 +9,8 @@
   variables:
     GIT_SUBMODULE_STRATEGY: recursive
     CORENAME: miniaudio
+    MAKEFILE_PATH: test
+    JNI_PATH: test
 
 # Inclusion templates, required for the build to work
 include:

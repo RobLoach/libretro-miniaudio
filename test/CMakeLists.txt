@@ -17,7 +17,7 @@ add_library(miniaudio_libretro
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include libretro-common, so that 'libretro.h' can be found.
-target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include" "include" ".")
+target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include" ".." ".")
 
 # Provide an 'stdint.h' for older versions of MSVC.
 if(MSVC AND MSVC_VERSION LESS 1600)

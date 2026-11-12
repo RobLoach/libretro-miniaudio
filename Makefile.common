@@ -1,3 +1,0 @@
-CFLAGS += -Ilibretro-common/include -Iinclude -I$(CORE_DIR)
-
-SOURCES_C   := $(CORE_DIR)/libretro.c

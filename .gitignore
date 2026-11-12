@@ -1,8 +1,8 @@
 # Object file.
-/*.o
+*.o
 
 # Built libretro core.
-/miniaudio_libretro.*
+miniaudio_libretro.*
 
 # Typical CMake build directory.
 /build
