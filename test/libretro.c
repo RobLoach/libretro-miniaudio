@@ -59,13 +59,15 @@ static retro_environment_t environ_cb;
 static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 
+#define CORE_FPS 60.0
+#define CORE_SAMPLE_RATE 48000
+
 void retro_get_system_av_info(struct retro_system_av_info* info) {
   float aspect = 4.0f / 3.0f;
-  float sampling_rate = 48000.0f;
 
   info->timing = (struct retro_system_timing){
-      .fps = 30.0,
-      .sample_rate = sampling_rate,
+      .fps = CORE_FPS,
+      .sample_rate = CORE_SAMPLE_RATE,
   };
 
   info->geometry = (struct retro_game_geometry){
@@ -173,12 +175,14 @@ bool retro_load_game(const struct retro_game_info* info) {
   }
 
   libretro_miniaudio_config audio_cfg = libretro_miniaudio_config_default();
+  audio_cfg.sample_rate = CORE_SAMPLE_RATE;
+  audio_cfg.fps = CORE_FPS;
   audio_cfg.log_cb = log_cb;
   if (!libretro_miniaudio_init(&audio_cfg)) {
     return false;
   }
 
-  if (!libretro_miniaudio_sound_load_from_memory(&g_sound, info->data, info->size, info->path)) {
+  if (!libretro_miniaudio_sound_load_from_memory_copy(&g_sound, info->data, info->size, info->path)) {
     log_cb(RETRO_LOG_ERROR, "Failed to initialize sound from content data.\n");
     libretro_miniaudio_uninit();
     return false;
