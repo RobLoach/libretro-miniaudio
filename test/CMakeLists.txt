@@ -1,23 +1,24 @@
-cmake_minimum_required(VERSION 3.0.2...3.16.3)
+# Built through the root CMakeLists.txt with LIBRETRO_MINIAUDIO_BUILD_TEST.
 
 option(BUILD_SHARED_LIBS "Create a shared library instead of a static library." ON)
-
-project(miniaudio_libretro LANGUAGES C)
 
 # Sources.
 add_library(miniaudio_libretro
 	"libretro.c"
 )
 
+# Link the header-only libretro-miniaudio library.
+target_link_libraries(miniaudio_libretro PRIVATE libretro_miniaudio::libretro_miniaudio)
+
 ############################################
 # Standard libretro core boilerplate code. #
 ############################################
 
 # Avoid some relocation-related linker errors when building a shared library that depends on static libraries.
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set_target_properties(miniaudio_libretro PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Include libretro-common, so that 'libretro.h' can be found.
-target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include" ".." ".")
+target_include_directories(miniaudio_libretro PRIVATE "libretro-common/include" ".")
 
 # Provide an 'stdint.h' for older versions of MSVC.
 if(MSVC AND MSVC_VERSION LESS 1600)
