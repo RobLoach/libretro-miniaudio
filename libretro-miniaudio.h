@@ -288,6 +288,10 @@ void libretro_miniaudio_uninit(void) {
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
    uint32_t frames;
    uint32_t channels;
+   ma_uint64 frames_read = 0;
+   const int16_t* data;
+   size_t remaining;
+   size_t accepted;
 
    if (!g_libretro_miniaudio.initialized || !audio_batch_cb) {
       return;
@@ -305,11 +309,29 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
       return;
    }
 
-   ma_engine_read_pcm_frames(&g_libretro_miniaudio.engine, g_libretro_miniaudio.buf_f32, frames, NULL);
+   /* Pad short or failed reads with silence so stale samples never go out. */
+   if (ma_engine_read_pcm_frames(&g_libretro_miniaudio.engine, g_libretro_miniaudio.buf_f32, frames, &frames_read) != MA_SUCCESS) {
+      frames_read = 0;
+   }
+   if (frames_read < frames) {
+      memset(g_libretro_miniaudio.buf_f32 + frames_read * channels, 0,
+         (size_t)(frames - frames_read) * channels * sizeof(float));
+   }
    ma_pcm_f32_to_s16(g_libretro_miniaudio.buf_s16,
       g_libretro_miniaudio.buf_f32,
       (ma_uint64)frames * channels, ma_dither_mode_none);
-   audio_batch_cb(g_libretro_miniaudio.buf_s16, frames);
+
+   /* The frontend may accept fewer frames than offered; stop if it takes none. */
+   data = g_libretro_miniaudio.buf_s16;
+   remaining = frames;
+   while (remaining > 0) {
+      accepted = audio_batch_cb(data, remaining);
+      if (accepted == 0 || accepted >= remaining) {
+         break;
+      }
+      data += accepted * channels;
+      remaining -= accepted;
+   }
 }
 
 /**
@@ -542,7 +564,9 @@ void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t fra
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound) {
    ma_uint64 cursor = 0;
    if (sound && g_libretro_miniaudio.initialized) {
-      ma_sound_get_cursor_in_pcm_frames(sound, &cursor);
+      if (ma_sound_get_cursor_in_pcm_frames(sound, &cursor) != MA_SUCCESS) {
+         return 0;
+      }
    }
    return (uint64_t)cursor;
 }
@@ -550,7 +574,9 @@ uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* s
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound) {
    ma_uint64 length = 0;
    if (sound && g_libretro_miniaudio.initialized) {
-      ma_sound_get_length_in_pcm_frames(sound, &length);
+      if (ma_sound_get_length_in_pcm_frames(sound, &length) != MA_SUCCESS) {
+         return 0;
+      }
    }
    return (uint64_t)length;
 }
