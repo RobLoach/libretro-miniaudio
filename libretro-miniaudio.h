@@ -35,8 +35,8 @@ extern "C" {
 
 typedef struct libretro_miniaudio_config {
    uint32_t           sample_rate;  /* default 48000 */
-   uint32_t           channels;     /* default 2     */
-   double             fps;          /* default 60.0  */
+   uint32_t           channels;     /* must be 2: libretro takes interleaved stereo int16 */
+   double             fps;          /* default 60.0, must be > 0 */
    retro_log_printf_t log_cb;       /* optional      */
 } libretro_miniaudio_config;
 
@@ -104,7 +104,9 @@ typedef struct libretro_miniaudio_state {
    bool                           initialized;
    libretro_miniaudio_config      cfg;
    ma_engine                      engine;
-   uint32_t                       frames_per_run;
+   uint32_t                       max_frames_per_run;  /* ceil(sample_rate / fps), buffer capacity */
+   double                         frames_per_run;      /* exact sample_rate / fps */
+   double                         frames_accum;        /* carried fractional remainder */
    float*                         buf_f32;
    int16_t*                       buf_s16;
    libretro_miniaudio_sound_entry sounds[LIBRETRO_MINIAUDIO_MAX_SOUNDS];
@@ -153,7 +155,18 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
       cfg = &default_cfg;
    }
 
-   if (cfg->channels == 0 || cfg->sample_rate == 0 || cfg->fps <= 0.0) {
+   if (cfg->channels != 2) {
+      if (cfg->log_cb) {
+         cfg->log_cb(RETRO_LOG_ERROR, "[libretro-miniaudio] Channels must be 2 (interleaved stereo), got %u.\n", (unsigned)cfg->channels);
+      }
+      return false;
+   }
+
+   /* Written as !(fps > 0) so that NaN is rejected too. */
+   if (cfg->sample_rate == 0 || !(cfg->fps > 0.0)) {
+      if (cfg->log_cb) {
+         cfg->log_cb(RETRO_LOG_ERROR, "[libretro-miniaudio] Invalid sample rate or fps.\n");
+      }
       return false;
    }
 
@@ -171,8 +184,16 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
       return false;
    }
 
-   g_libretro_miniaudio.frames_per_run = (uint32_t)(((double)cfg->sample_rate / cfg->fps) + 0.5);
-   buf_samples = g_libretro_miniaudio.frames_per_run * cfg->channels;
+   /* run() emits floor or ceil of the exact rate per call, carrying the
+    * remainder. Starting the accumulator at 0.5 makes the running total
+    * round(calls * sample_rate / fps). Buffers are sized for the ceiling. */
+   g_libretro_miniaudio.frames_per_run = (double)cfg->sample_rate / cfg->fps;
+   g_libretro_miniaudio.frames_accum = 0.5;
+   g_libretro_miniaudio.max_frames_per_run = (uint32_t)g_libretro_miniaudio.frames_per_run;
+   if ((double)g_libretro_miniaudio.max_frames_per_run < g_libretro_miniaudio.frames_per_run) {
+      g_libretro_miniaudio.max_frames_per_run++;
+   }
+   buf_samples = g_libretro_miniaudio.max_frames_per_run * cfg->channels;
 
    g_libretro_miniaudio.buf_f32 = (float*)calloc(buf_samples, sizeof(float));
    g_libretro_miniaudio.buf_s16 = (int16_t*)calloc(buf_samples, sizeof(int16_t));
@@ -218,9 +239,10 @@ void libretro_miniaudio_uninit(void) {
 /**
  * @brief Pumps one frame's worth of audio out to libretro.
  *
- * Reads sample_rate / fps frames from the engine, converts them from float to
- * signed 16-bit PCM, and submits them via the provided libretro batch
- * callback. Call once per retro_run() invocation.
+ * Reads floor or ceil of sample_rate / fps frames from the engine, carrying
+ * the fractional remainder between calls so the total does not drift,
+ * converts them from float to signed 16-bit PCM, and submits them via the
+ * provided libretro batch callback. Call once per retro_run() invocation.
  *
  * @param audio_batch_cb The audio batch callback the core received via
  *                       retro_set_audio_sample_batch(). Must be non-NULL.
@@ -233,8 +255,17 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
       return;
    }
 
-   frames = g_libretro_miniaudio.frames_per_run;
+   g_libretro_miniaudio.frames_accum += g_libretro_miniaudio.frames_per_run;
+   frames = (uint32_t)g_libretro_miniaudio.frames_accum;
+   if (frames > g_libretro_miniaudio.max_frames_per_run) {
+      frames = g_libretro_miniaudio.max_frames_per_run;
+   }
+   g_libretro_miniaudio.frames_accum -= (double)frames;
    channels = g_libretro_miniaudio.cfg.channels;
+
+   if (frames == 0) {
+      return;
+   }
 
    ma_engine_read_pcm_frames(&g_libretro_miniaudio.engine, g_libretro_miniaudio.buf_f32, frames, NULL);
    ma_pcm_f32_to_s16(g_libretro_miniaudio.buf_s16,
