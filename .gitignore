@@ -11,3 +11,6 @@ miniaudio_libretro.*
 *.ogg
 *.mp3
 *.flac
+
+# Test binary.
+/test/libretro_miniaudio_test

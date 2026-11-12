@@ -145,6 +145,20 @@ retroarch -L example/miniaudio_libretro.so example/amen.wav
 
 The example core also plays OGG, FLAC and MP3 content.
 
+## Testing
+
+The tests in `test/` also use the `libretro-common` submodule:
+
+```bash
+# Make: builds and runs the tests (SANITIZE=1 adds AddressSanitizer and UBSan)
+make -C test
+
+# or CMake
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
 ## License
 
 - libretro-miniaudio is licensed under the [MIT License](https://opensource.org/licenses/MIT)
