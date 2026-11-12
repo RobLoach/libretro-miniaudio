@@ -20,12 +20,26 @@
 
 #include "libretro.h"
 
-// MiniAudio Configuration
+/* miniaudio configuration. Define other MA_* options (e.g. MA_NO_MP3) before
+ * including this header, or define LIBRETRO_MINIAUDIO_NO_MA_CONFIG to skip
+ * these defaults entirely. */
+#ifndef LIBRETRO_MINIAUDIO_NO_MA_CONFIG
+#ifndef MA_NO_RUNTIME_LINKING
 #define MA_NO_RUNTIME_LINKING
+#endif
+#ifndef MA_NO_DEVICE_IO
 #define MA_NO_DEVICE_IO
+#endif
+#ifndef MA_NO_THREADING
 #define MA_NO_THREADING
+#endif
+#ifndef MA_NO_GENERATION
 #define MA_NO_GENERATION
+#endif
+#ifndef MA_NO_ENCODING
 #define MA_NO_ENCODING
+#endif
+#endif
 
 #include "miniaudio.h"
 
