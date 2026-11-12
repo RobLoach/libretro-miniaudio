@@ -33,6 +33,7 @@ else ifneq ($(findstring MINGW,$(shell uname -a)),)
 endif
 
 TARGET_NAME := miniaudio
+CORE_DIR := .
 GIT_VERSION ?= " $(shell git rev-parse --short HEAD || echo unknown)"
 ifneq ($(GIT_VERSION)," unknown")
 	CFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
@@ -66,12 +67,12 @@ ifneq (,$(filter $(platform), unix unix-armv7-hardfloat-neon))
 	EXT?=so
    TARGET := $(TARGET_NAME)_libretro$(PLAT).$(EXT)
    fpic := -fPIC
-   SHARED := -shared -Wl,--no-undefined
+   SHARED := -shared -Wl,--version-script=$(CORE_DIR)/link.T -Wl,--no-undefined
 else ifeq ($(platform), linux-portable)
 	EXT?=so
    TARGET := $(TARGET_NAME)_libretro.$(EXT)
    fpic := -fPIC -nostdlib
-   SHARED := -shared -Wl,--no-undefined
+   SHARED := -shared -Wl,--version-script=$(CORE_DIR)/link.T -Wl,--no-undefined
 	LIBM :=
 else ifeq ($(platform), osx)
 	EXT?=dylib
@@ -595,7 +596,7 @@ else
    endif
 
    TARGET := $(TARGET_NAME)_libretro.$(EXT)
-   SHARED := -shared -static-libgcc -static-libstdc++ -Wl,--no-undefined -s
+   SHARED := -shared -static-libgcc -static-libstdc++ -Wl,--version-script=$(CORE_DIR)/link.T -Wl,--no-undefined -s
 endif
 
 ifeq ($(STATIC_LINKING),1)
@@ -626,8 +627,6 @@ endif
 CFLAGS   += -O2 -DNDEBUG
 CXXFLAGS += -O2 -DNDEBUG
 endif
-
-CORE_DIR := .
 
 include Makefile.common
 

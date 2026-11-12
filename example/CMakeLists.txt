@@ -31,6 +31,12 @@ target_compile_definitions(miniaudio_libretro PRIVATE __LIBRETRO__)
 # Allow only the libretro API functions to be exported.
 set_target_properties(miniaudio_libretro PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
+# Restrict exported symbols to retro_* with the version script on GNU-style linkers.
+if(NOT APPLE AND NOT MSVC AND NOT EMSCRIPTEN)
+	set_property(TARGET miniaudio_libretro APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/link.T")
+	set_property(TARGET miniaudio_libretro APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/link.T")
+endif()
+
 # Adjust the library's filename. This is relied upon by libretro's CI infrastructure.
 
 # Remove the 'lib' prefix.
