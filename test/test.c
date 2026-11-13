@@ -26,6 +26,7 @@ static int g_failures;
 } while (0)
 
 /* Test assets. */
+static const char*    g_amen_path;
 static void*          g_amen;
 static size_t         g_amen_size;
 static unsigned char* g_tone;
@@ -190,6 +191,76 @@ static unsigned char* make_wav(uint32_t frames, size_t* out_size) {
    }
    *out_size = size;
    return w;
+}
+
+/* Stub libretro VFS backed by stdio, counting opens and closes. */
+static int g_vfs_opens;
+static int g_vfs_closes;
+
+static struct retro_vfs_file_handle* RETRO_CALLCONV vfs_open(const char* path, unsigned mode, unsigned hints) {
+   FILE* f;
+   (void)hints;
+   if (mode != RETRO_VFS_FILE_ACCESS_READ) {
+      return NULL;
+   }
+   f = fopen(path, "rb");
+   if (f) {
+      g_vfs_opens++;
+   }
+   return (struct retro_vfs_file_handle*)f;
+}
+
+static struct retro_vfs_file_handle* RETRO_CALLCONV vfs_open_fail(const char* path, unsigned mode, unsigned hints) {
+   (void)path;
+   (void)mode;
+   (void)hints;
+   return NULL;
+}
+
+static int RETRO_CALLCONV vfs_close(struct retro_vfs_file_handle* stream) {
+   g_vfs_closes++;
+   return fclose((FILE*)stream) == 0 ? 0 : -1;
+}
+
+static int64_t RETRO_CALLCONV vfs_tell(struct retro_vfs_file_handle* stream) {
+   return (int64_t)ftell((FILE*)stream);
+}
+
+static int64_t RETRO_CALLCONV vfs_seek(struct retro_vfs_file_handle* stream, int64_t offset, int seek_position) {
+   int whence = seek_position == RETRO_VFS_SEEK_POSITION_CURRENT ? SEEK_CUR
+              : seek_position == RETRO_VFS_SEEK_POSITION_END ? SEEK_END : SEEK_SET;
+   if (fseek((FILE*)stream, (long)offset, whence) != 0) {
+      return -1;
+   }
+   return vfs_tell(stream);
+}
+
+static int64_t RETRO_CALLCONV vfs_size(struct retro_vfs_file_handle* stream) {
+   long pos = ftell((FILE*)stream);
+   long size;
+   if (pos < 0 || fseek((FILE*)stream, 0, SEEK_END) != 0) {
+      return -1;
+   }
+   size = ftell((FILE*)stream);
+   fseek((FILE*)stream, pos, SEEK_SET);
+   return (int64_t)size;
+}
+
+static int64_t RETRO_CALLCONV vfs_read(struct retro_vfs_file_handle* stream, void* s, uint64_t len) {
+   size_t n = fread(s, 1, (size_t)len, (FILE*)stream);
+   return (n == 0 && ferror((FILE*)stream)) ? -1 : (int64_t)n;
+}
+
+static struct retro_vfs_interface make_vfs(void) {
+   struct retro_vfs_interface vfs;
+   memset(&vfs, 0, sizeof(vfs));
+   vfs.open = vfs_open;
+   vfs.close = vfs_close;
+   vfs.size = vfs_size;
+   vfs.tell = vfs_tell;
+   vfs.seek = vfs_seek;
+   vfs.read = vfs_read;
+   return vfs;
 }
 
 /* --- frames: fractional frame accounting -------------------------------- */
@@ -518,8 +589,81 @@ static void test_batch_callback(void) {
    libretro_miniaudio_deinit();
 }
 
+/* --- files: loading through the libretro VFS ---------------------------- */
+
+static void test_load_from_file(void) {
+   struct retro_vfs_interface vfs = make_vfs();
+   libretro_miniaudio_config cfg = make_config();
+   libretro_miniaudio_sound mem, streamed, decoded;
+   uint64_t amen_len;
+   int logs;
+   bool ok;
+
+   cfg.vfs = &vfs;
+   g_vfs_opens = g_vfs_closes = 0;
+   CHECK(libretro_miniaudio_init(&cfg));
+
+   /* Streamed and decoded loads match the memory loader's length. */
+   CHECK(libretro_miniaudio_sound_load_from_memory(&mem, g_amen, g_amen_size, NULL));
+   amen_len = libretro_miniaudio_sound_get_length(&mem);
+   libretro_miniaudio_sound_unload(&mem);
+   CHECK(amen_len > 48000 * 2);  /* longer than the two stream pages */
+   CHECK(libretro_miniaudio_sound_load_from_file(&streamed, g_amen_path, true));
+   CHECK(libretro_miniaudio_sound_load_from_file(&decoded, g_amen_path, false));
+   CHECK(g_vfs_opens >= 2);
+   CHECK(tracked_count() == 2);
+   CHECK(libretro_miniaudio_sound_get_length(&streamed) == amen_len);
+   CHECK(libretro_miniaudio_sound_get_length(&decoded) == amen_len);
+
+   /* The stream keeps producing audio past its first two pages. */
+   libretro_miniaudio_sound_play(&streamed);
+   run_frames(180);
+   reset_stats();
+   run_frames(10);
+   CHECK(g_nonzero > 0);
+   CHECK(libretro_miniaudio_sound_is_playing(&streamed));
+   CHECK(libretro_miniaudio_sound_get_position(&streamed) >= 180 * 800);
+
+   libretro_miniaudio_sound_unload(&streamed);
+   libretro_miniaudio_sound_unload(&decoded);
+   CHECK(tracked_count() == 0);
+   CHECK(g_vfs_opens == g_vfs_closes);
+
+   /* Deinit with a streamed sound still loaded closes its file. */
+   CHECK(libretro_miniaudio_sound_load_from_file(&streamed, g_amen_path, true));
+   libretro_miniaudio_deinit();
+   CHECK(g_vfs_opens == g_vfs_closes);
+
+   /* A VFS that cannot open anything fails the load and logs it. Only the
+    * streamed path is checked: a failed decoded load reads freed memory inside
+    * miniaudio 0.11.25, which is fixed upstream in 0.11.26. */
+   vfs.open = vfs_open_fail;
+   CHECK(libretro_miniaudio_init(&cfg));
+   logs = g_log_count;
+   g_log_quiet = 1;
+   ok = libretro_miniaudio_sound_load_from_file(&streamed, g_amen_path, true);
+   g_log_quiet = 0;
+   CHECK(!ok);
+   CHECK(g_log_count > logs);
+   CHECK(tracked_count() == 0);
+   CHECK(!libretro_miniaudio_sound_load_from_file(NULL, g_amen_path, true));
+   CHECK(!libretro_miniaudio_sound_load_from_file(&streamed, NULL, true));
+   libretro_miniaudio_deinit();
+
+   /* Without a VFS, miniaudio's default one is used. */
+   cfg.vfs = NULL;
+   CHECK(libretro_miniaudio_init(&cfg));
+   CHECK(libretro_miniaudio_sound_load_from_file(&streamed, g_amen_path, true));
+   CHECK(libretro_miniaudio_sound_get_length(&streamed) == amen_len);
+   libretro_miniaudio_sound_unload(&streamed);
+   libretro_miniaudio_deinit();
+   CHECK(!libretro_miniaudio_sound_load_from_file(&streamed, g_amen_path, true));
+}
+
 int main(int argc, char* argv[]) {
    const char* amen_path = argc > 1 ? argv[1] : "../example/amen.wav";
+
+   g_amen_path = amen_path;
 
    /* Keep failure output ahead of any sanitizer report. */
    setvbuf(stdout, NULL, _IONBF, 0);
@@ -542,6 +686,7 @@ int main(int argc, char* argv[]) {
    test_shared_names();
    test_teardown();
    test_batch_callback();
+   test_load_from_file();
 
    free(g_amen);
    free(g_tone);
