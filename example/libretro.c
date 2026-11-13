@@ -212,40 +212,17 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info* info, 
   return false;  // No special content types.
 }
 
-// Save state: the sound's playback position in frames, then a playing flag.
-#define SAVE_STATE_SIZE (sizeof(uint64_t) + 1)
-
+// Save state: the sound's playback state, restored onto the same sound after reload.
 size_t retro_serialize_size(void) {
-  return SAVE_STATE_SIZE;
+  return libretro_miniaudio_serialize_size();
 }
 
 bool retro_serialize(void* data, size_t size) {
-  if (!g_sound_loaded || !data || size < SAVE_STATE_SIZE) {
-    return false;
-  }
-
-  uint8_t* out = data;
-  uint64_t position = libretro_miniaudio_sound_get_position(&g_sound);
-  memcpy(out, &position, sizeof(position));
-  out[sizeof(position)] = libretro_miniaudio_sound_is_playing(&g_sound) ? 1 : 0;
-  return true;
+  return libretro_miniaudio_serialize(data, size);
 }
 
 bool retro_unserialize(const void* data, size_t size) {
-  if (!g_sound_loaded || !data || size < SAVE_STATE_SIZE) {
-    return false;
-  }
-
-  const uint8_t* in = data;
-  uint64_t position;
-  memcpy(&position, in, sizeof(position));
-  libretro_miniaudio_sound_seek(&g_sound, position);
-  if (in[sizeof(position)]) {
-    libretro_miniaudio_sound_play(&g_sound);
-  } else {
-    libretro_miniaudio_sound_stop(&g_sound);
-  }
-  return true;
+  return libretro_miniaudio_unserialize(data, size);
 }
 
 void* retro_get_memory_data(unsigned id) {

@@ -104,6 +104,9 @@ void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t fra
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
 const char* libretro_miniaudio_version(void);
+size_t libretro_miniaudio_serialize_size(void);
+bool libretro_miniaudio_serialize(void* data, size_t size);
+bool libretro_miniaudio_unserialize(const void* data, size_t size);
 
 #ifdef __cplusplus
 }
@@ -713,6 +716,169 @@ uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sou
  */
 const char* libretro_miniaudio_version(void) {
    return MA_VERSION_STRING;
+}
+
+/** @cond INTERNAL */
+
+/** @internal @brief Save-state magic, "LRMA". */
+#define LIBRETRO_MINIAUDIO_STATE_MAGIC "LRMA"
+/** @internal @brief Save-state format version. */
+#define LIBRETRO_MINIAUDIO_STATE_VERSION 1
+/** @internal @brief Header: magic, version, master volume (f32), run() accumulator (f64). */
+#define LIBRETRO_MINIAUDIO_STATE_HEADER_SIZE (4 + 1 + 4 + 8)
+/** @internal @brief Per-slot record: in-use, playing, looping, volume (f32), cursor (u64). */
+#define LIBRETRO_MINIAUDIO_STATE_RECORD_SIZE (1 + 1 + 1 + 4 + 8)
+
+/** @internal @brief Writes v as little-endian into n bytes at p. */
+static uint8_t* libretro_miniaudio_put_le(uint8_t* p, uint64_t v, int n) {
+   int i;
+   for (i = 0; i < n; ++i) {
+      p[i] = (uint8_t)(v >> (8 * i));
+   }
+   return p + n;
+}
+
+/** @internal @brief Reads an n-byte little-endian value at p. */
+static uint64_t libretro_miniaudio_get_le(const uint8_t* p, int n) {
+   uint64_t v = 0;
+   int i;
+   for (i = 0; i < n; ++i) {
+      v |= (uint64_t)p[i] << (8 * i);
+   }
+   return v;
+}
+
+/** @endcond */
+
+/**
+ * @brief Returns the size of the buffer libretro_miniaudio_serialize() needs.
+ *
+ * The size is fixed: a small header plus one record per
+ * LIBRETRO_MINIAUDIO_MAX_SOUNDS slot, independent of which sounds are loaded,
+ * so it can be returned from retro_serialize_size() at any time.
+ *
+ * @return Save-state size in bytes.
+ */
+size_t libretro_miniaudio_serialize_size(void) {
+   return LIBRETRO_MINIAUDIO_STATE_HEADER_SIZE + (size_t)LIBRETRO_MINIAUDIO_MAX_SOUNDS * LIBRETRO_MINIAUDIO_STATE_RECORD_SIZE;
+}
+
+/**
+ * @brief Writes the playback state of every sound slot into a buffer.
+ *
+ * Saves the master volume, the run() fractional frame accumulator and, per
+ * slot, whether it holds a sound and that sound's playing flag, looping flag,
+ * volume and cursor in PCM frames. Values are stored little-endian. Only
+ * playback state is saved, not audio data: the core must reload the same
+ * sounds in the same order before libretro_miniaudio_unserialize().
+ *
+ * @param data Destination buffer. Must not be NULL.
+ * @param size Size of data; at least libretro_miniaudio_serialize_size().
+ * @return true on success, false if not initialized, data is NULL or size is
+ *         too small.
+ */
+bool libretro_miniaudio_serialize(void* data, size_t size) {
+   uint8_t*  p = (uint8_t*)data;
+   ma_sound* s;
+   ma_uint64 cursor;
+   uint32_t  u32;
+   uint64_t  u64;
+   float     f;
+   double    d;
+   int       i;
+
+   if (!data || size < libretro_miniaudio_serialize_size() || !g_libretro_miniaudio.initialized) {
+      return false;
+   }
+
+   memcpy(p, LIBRETRO_MINIAUDIO_STATE_MAGIC, 4);
+   p += 4;
+   *p++ = LIBRETRO_MINIAUDIO_STATE_VERSION;
+   f = ma_engine_get_volume(&g_libretro_miniaudio.engine);
+   memcpy(&u32, &f, sizeof(u32));
+   p = libretro_miniaudio_put_le(p, u32, 4);
+   d = g_libretro_miniaudio.frames_accum;
+   memcpy(&u64, &d, sizeof(u64));
+   p = libretro_miniaudio_put_le(p, u64, 8);
+
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      s = g_libretro_miniaudio.sounds[i].sound;
+      memset(p, 0, LIBRETRO_MINIAUDIO_STATE_RECORD_SIZE);
+      if (s) {
+         cursor = 0;
+         ma_sound_get_cursor_in_pcm_frames(s, &cursor);
+         p[0] = 1;
+         p[1] = ma_sound_is_playing(s) ? 1 : 0;
+         p[2] = ma_sound_is_looping(s) ? 1 : 0;
+         f = ma_sound_get_volume(s);
+         memcpy(&u32, &f, sizeof(u32));
+         libretro_miniaudio_put_le(p + 3, u32, 4);
+         libretro_miniaudio_put_le(p + 7, (uint64_t)cursor, 8);
+      }
+      p += LIBRETRO_MINIAUDIO_STATE_RECORD_SIZE;
+   }
+   return true;
+}
+
+/**
+ * @brief Restores playback state written by libretro_miniaudio_serialize().
+ *
+ * State is applied by slot, so the core must have loaded the same sounds in
+ * the same order as when the state was saved. Slots whose saved and current
+ * in-use flags differ are skipped rather than treated as errors.
+ *
+ * @param data Buffer from libretro_miniaudio_serialize(). Must not be NULL.
+ * @param size Size of data; at least libretro_miniaudio_serialize_size().
+ * @return true on success, false if not initialized, data is NULL, size is too
+ *         small, or the magic or version does not match.
+ */
+bool libretro_miniaudio_unserialize(const void* data, size_t size) {
+   const uint8_t* p = (const uint8_t*)data;
+   ma_sound*      s;
+   uint32_t       u32;
+   uint64_t       u64;
+   float          f;
+   double         d;
+   int            i;
+
+   if (!data || size < libretro_miniaudio_serialize_size() || !g_libretro_miniaudio.initialized) {
+      return false;
+   }
+   if (memcmp(p, LIBRETRO_MINIAUDIO_STATE_MAGIC, 4) != 0 || p[4] != LIBRETRO_MINIAUDIO_STATE_VERSION) {
+      return false;
+   }
+   p += 5;
+
+   u32 = (uint32_t)libretro_miniaudio_get_le(p, 4);
+   memcpy(&f, &u32, sizeof(f));
+   ma_engine_set_volume(&g_libretro_miniaudio.engine, f);
+   p += 4;
+   u64 = libretro_miniaudio_get_le(p, 8);
+   memcpy(&d, &u64, sizeof(d));
+   /* Only accept an in-range remainder, so run() never casts garbage. */
+   if (d >= 0.0 && d < 1.0) {
+      g_libretro_miniaudio.frames_accum = d;
+   }
+   p += 8;
+
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      s = g_libretro_miniaudio.sounds[i].sound;
+      if (s && p[0]) {
+         ma_sound_set_looping(s, p[2] ? MA_TRUE : MA_FALSE);
+         u32 = (uint32_t)libretro_miniaudio_get_le(p + 3, 4);
+         memcpy(&f, &u32, sizeof(f));
+         ma_sound_set_volume(s, f);
+         ma_sound_seek_to_pcm_frame(s, (ma_uint64)libretro_miniaudio_get_le(p + 7, 8));
+         if (p[1]) {
+            ma_sound_start(s);
+         }
+         else {
+            ma_sound_stop(s);
+         }
+      }
+      p += LIBRETRO_MINIAUDIO_STATE_RECORD_SIZE;
+   }
+   return true;
 }
 
 #endif /* LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD */

@@ -118,7 +118,25 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
+
+size_t libretro_miniaudio_serialize_size(void);
+bool libretro_miniaudio_serialize(void* data, size_t size);
+bool libretro_miniaudio_unserialize(const void* data, size_t size);
 ```
+
+## Save States
+
+The serialize functions map directly onto `retro_serialize_size()`, `retro_serialize()` and `retro_unserialize()`:
+
+```c
+size_t retro_serialize_size(void) { return libretro_miniaudio_serialize_size(); }
+bool retro_serialize(void* data, size_t size) { return libretro_miniaudio_serialize(data, size); }
+bool retro_unserialize(const void* data, size_t size) { return libretro_miniaudio_unserialize(data, size); }
+```
+
+They save the master volume, the fractional frame remainder and, for each of the `LIBRETRO_MINIAUDIO_MAX_SOUNDS` sound slots, whether it is playing, looping, its volume and its position. The size is fixed regardless of which sounds are loaded, and the data is little-endian so states are portable.
+
+Audio data is not saved. The core must load the same sounds in the same order before unserializing, since state is restored by slot. Slots that were empty when saved, or are empty now, are skipped. Buffers that are too small or do not come from `libretro_miniaudio_serialize()` are rejected.
 
 ## Options
 
