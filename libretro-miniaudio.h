@@ -73,14 +73,16 @@ typedef struct libretro_miniaudio_config {
    uint32_t           channels;     /**< Must be 2: libretro takes interleaved stereo int16. */
    double             fps;          /**< Core frame rate; sets frames per run(). Default 60.0, must be > 0. */
    retro_log_printf_t log_cb;       /**< Optional libretro log callback for errors. May be NULL (default). */
+   struct retro_vfs_interface* vfs; /**< Optional libretro VFS used by sound_load_from_file(). NULL (default) uses miniaudio's stdio VFS. Must outlive the engine. */
 } libretro_miniaudio_config;
 
 /**
  * @brief Sound handle; an alias of miniaudio's ma_sound.
  *
  * Allocated by the caller and populated by
- * libretro_miniaudio_sound_load_from_memory() or
- * libretro_miniaudio_sound_load_from_memory_copy(). The address must stay
+ * libretro_miniaudio_sound_load_from_memory(),
+ * libretro_miniaudio_sound_load_from_memory_copy() or
+ * libretro_miniaudio_sound_load_from_file(). The address must stay
  * stable while the sound is loaded.
  */
 typedef ma_sound libretro_miniaudio_sound;
@@ -98,6 +100,7 @@ void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool 
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume);
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
 bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
+bool libretro_miniaudio_sound_load_from_file(libretro_miniaudio_sound* sound, const char* path, bool stream);
 void libretro_miniaudio_set_master_volume(float volume);
 float libretro_miniaudio_get_master_volume(void);
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
@@ -153,9 +156,19 @@ const char* libretro_miniaudio_version(void);
  */
 typedef struct libretro_miniaudio_sound_entry {
    ma_sound* sound;     /**< Tracked sound, or NULL if the slot is free. */
-   char      name[24];  /**< Unique internal registration name. */
+   char      name[24];  /**< Unique internal registration name, or empty for file loads. */
    void*     data;      /**< Owned copy of the encoded data, or NULL. */
 } libretro_miniaudio_sound_entry;
+
+/**
+ * @internal
+ * @brief miniaudio VFS backed by a libretro VFS interface. The callbacks must
+ *        be the first member so the struct can be passed as an ma_vfs*.
+ */
+typedef struct libretro_miniaudio_vfs {
+   ma_vfs_callbacks            cb;     /**< miniaudio VFS callbacks. */
+   struct retro_vfs_interface* iface;  /**< The libretro VFS the callbacks forward to. */
+} libretro_miniaudio_vfs;
 
 /**
  * @internal
@@ -171,18 +184,89 @@ typedef struct libretro_miniaudio_state {
    float*                         buf_f32;             /**< Engine output scratch buffer. */
    int16_t*                       buf_s16;             /**< Converted output handed to libretro. */
    uint32_t                       load_counter;        /**< Makes registration names unique. */
+   libretro_miniaudio_vfs         vfs;                 /**< VFS bridge used by the engine when cfg.vfs is set. */
    libretro_miniaudio_sound_entry sounds[LIBRETRO_MINIAUDIO_MAX_SOUNDS];  /**< Loaded-sound slots. */
 } libretro_miniaudio_state;
 
 /** @internal @brief The single global wrapper state instance. */
 static libretro_miniaudio_state g_libretro_miniaudio;
 
+/** @internal @brief Returns the libretro VFS interface behind a bridge. */
+#define LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS) (((libretro_miniaudio_vfs*)(pVFS))->iface)
+
+/** @internal @brief ma_vfs_callbacks.onOpen bridged to retro_vfs_interface.open. */
+static ma_result libretro_miniaudio_vfs_open(ma_vfs* pVFS, const char* pFilePath, ma_uint32 openMode, ma_vfs_file* pFile) {
+   unsigned mode = 0;
+   if ((openMode & MA_OPEN_MODE_READ) != 0) {
+      mode |= RETRO_VFS_FILE_ACCESS_READ;
+   }
+   if ((openMode & MA_OPEN_MODE_WRITE) != 0) {
+      mode |= RETRO_VFS_FILE_ACCESS_WRITE;
+   }
+   *pFile = (ma_vfs_file)LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->open(pFilePath, mode, RETRO_VFS_FILE_ACCESS_HINT_NONE);
+   return *pFile ? MA_SUCCESS : MA_DOES_NOT_EXIST;
+}
+
+/** @internal @brief ma_vfs_callbacks.onClose bridged to retro_vfs_interface.close. */
+static ma_result libretro_miniaudio_vfs_close(ma_vfs* pVFS, ma_vfs_file file) {
+   return LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->close((struct retro_vfs_file_handle*)file) == 0 ? MA_SUCCESS : MA_IO_ERROR;
+}
+
+/** @internal @brief ma_vfs_callbacks.onRead bridged to retro_vfs_interface.read. */
+static ma_result libretro_miniaudio_vfs_read(ma_vfs* pVFS, ma_vfs_file file, void* pDst, size_t sizeInBytes, size_t* pBytesRead) {
+   int64_t n = LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->read((struct retro_vfs_file_handle*)file, pDst, (uint64_t)sizeInBytes);
+   if (pBytesRead) {
+      *pBytesRead = n > 0 ? (size_t)n : 0;
+   }
+   if (n < 0) {
+      return MA_IO_ERROR;
+   }
+   /* miniaudio's ma_vfs_read() turns a zero-byte read into MA_AT_END. */
+   return MA_SUCCESS;
+}
+
+/** @internal @brief ma_vfs_callbacks.onWrite bridged to retro_vfs_interface.write. */
+static ma_result libretro_miniaudio_vfs_write(ma_vfs* pVFS, ma_vfs_file file, const void* pSrc, size_t sizeInBytes, size_t* pBytesWritten) {
+   int64_t n = LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->write((struct retro_vfs_file_handle*)file, pSrc, (uint64_t)sizeInBytes);
+   if (pBytesWritten) {
+      *pBytesWritten = n > 0 ? (size_t)n : 0;
+   }
+   return n < 0 ? MA_IO_ERROR : MA_SUCCESS;
+}
+
+/** @internal @brief ma_vfs_callbacks.onSeek bridged to retro_vfs_interface.seek. */
+static ma_result libretro_miniaudio_vfs_seek(ma_vfs* pVFS, ma_vfs_file file, ma_int64 offset, ma_seek_origin origin) {
+   int whence = RETRO_VFS_SEEK_POSITION_START;
+   if (origin == ma_seek_origin_current) {
+      whence = RETRO_VFS_SEEK_POSITION_CURRENT;
+   }
+   else if (origin == ma_seek_origin_end) {
+      whence = RETRO_VFS_SEEK_POSITION_END;
+   }
+   return LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->seek((struct retro_vfs_file_handle*)file, (int64_t)offset, whence) < 0 ? MA_IO_ERROR : MA_SUCCESS;
+}
+
+/** @internal @brief ma_vfs_callbacks.onTell bridged to retro_vfs_interface.tell. */
+static ma_result libretro_miniaudio_vfs_tell(ma_vfs* pVFS, ma_vfs_file file, ma_int64* pCursor) {
+   int64_t pos = LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->tell((struct retro_vfs_file_handle*)file);
+   *pCursor = pos < 0 ? 0 : (ma_int64)pos;
+   return pos < 0 ? MA_IO_ERROR : MA_SUCCESS;
+}
+
+/** @internal @brief ma_vfs_callbacks.onInfo bridged to retro_vfs_interface.size. */
+static ma_result libretro_miniaudio_vfs_info(ma_vfs* pVFS, ma_vfs_file file, ma_file_info* pInfo) {
+   int64_t size = LIBRETRO_MINIAUDIO_VFS_IFACE(pVFS)->size((struct retro_vfs_file_handle*)file);
+   pInfo->sizeInBytes = size < 0 ? 0 : (ma_uint64)size;
+   return size < 0 ? MA_IO_ERROR : MA_SUCCESS;
+}
+
 /** @endcond */
 
 /**
  * @brief Returns a libretro_miniaudio_config populated with default values.
  *
- * Defaults are 48000 Hz, 2 channels, 60.0 fps, and a NULL log callback.
+ * Defaults are 48000 Hz, 2 channels, 60.0 fps, and a NULL log callback and
+ * VFS.
  *
  * @return A config struct initialized with default values.
  */
@@ -192,6 +276,7 @@ libretro_miniaudio_config libretro_miniaudio_config_default(void) {
    cfg.channels = 2;
    cfg.fps = 60.0;
    cfg.log_cb = NULL;
+   cfg.vfs = NULL;
    return cfg;
 }
 
@@ -203,7 +288,8 @@ libretro_miniaudio_config libretro_miniaudio_config_default(void) {
  * MA_NO_DEVICE_IO, so audio is driven by libretro_miniaudio_run() rather than
  * a backend device.
  *
- * @param cfg Configuration to use; copied, so it need not outlive the call.
+ * @param cfg Configuration to use; copied, so it need not outlive the call
+ *            (though cfg->vfs, if set, must outlive the engine).
  *            NULL uses libretro_miniaudio_config_default(). channels must be
  *            2, and sample_rate and fps must be > 0.
  * @return true on success or if already initialized, false on invalid config
@@ -244,6 +330,21 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
    ec.noDevice    = MA_TRUE;
    ec.channels    = cfg->channels;
    ec.sampleRate  = cfg->sample_rate;
+
+   /* Route file loads through the frontend's VFS. Without one miniaudio falls
+    * back to its default stdio VFS. */
+   if (cfg->vfs) {
+      g_libretro_miniaudio.vfs.cb.onOpen  = libretro_miniaudio_vfs_open;
+      g_libretro_miniaudio.vfs.cb.onOpenW = NULL;
+      g_libretro_miniaudio.vfs.cb.onClose = libretro_miniaudio_vfs_close;
+      g_libretro_miniaudio.vfs.cb.onRead  = libretro_miniaudio_vfs_read;
+      g_libretro_miniaudio.vfs.cb.onWrite = cfg->vfs->write ? libretro_miniaudio_vfs_write : NULL;
+      g_libretro_miniaudio.vfs.cb.onSeek  = libretro_miniaudio_vfs_seek;
+      g_libretro_miniaudio.vfs.cb.onTell  = libretro_miniaudio_vfs_tell;
+      g_libretro_miniaudio.vfs.cb.onInfo  = libretro_miniaudio_vfs_info;
+      g_libretro_miniaudio.vfs.iface      = cfg->vfs;
+      ec.pResourceManagerVFS = &g_libretro_miniaudio.vfs;
+   }
 
    if (ma_engine_init(&ec, &g_libretro_miniaudio.engine) != MA_SUCCESS) {
       if (cfg->log_cb) {
@@ -291,7 +392,8 @@ static void libretro_miniaudio_sound_release(int i) {
    ma_resource_manager* rm;
    ma_sound_uninit(g_libretro_miniaudio.sounds[i].sound);
    rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
-   if (rm) {
+   /* File loads are reference counted by path and never registered. */
+   if (rm && g_libretro_miniaudio.sounds[i].name[0]) {
       ma_resource_manager_unregister_data(rm, g_libretro_miniaudio.sounds[i].name);
    }
 }
@@ -349,9 +451,20 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
    const int16_t* data;
    size_t remaining;
    size_t accepted;
+   ma_resource_manager* rm;
+   ma_result r;
 
    if (!g_libretro_miniaudio.initialized || !audio_batch_cb) {
       return;
+   }
+
+   /* Without job threads, streamed sounds only decode their next page when
+    * the resource manager's queued jobs are processed here. */
+   rm = ma_engine_get_resource_manager(&g_libretro_miniaudio.engine);
+   if (rm && (rm->config.flags & MA_RESOURCE_MANAGER_FLAG_NO_THREADING) != 0) {
+      do {
+         r = ma_resource_manager_process_next_job(rm);
+      } while (r != MA_NO_DATA_AVAILABLE && r != MA_CANCELLED);
    }
 
    g_libretro_miniaudio.frames_accum += g_libretro_miniaudio.frames_per_run;
@@ -626,6 +739,62 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) 
  */
 bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name) {
    return libretro_miniaudio_sound_load_internal(sound, data, size, name, true);
+}
+
+/**
+ * @brief Loads an encoded audio file by path through the configured VFS.
+ *
+ * Files are opened through libretro_miniaudio_config.vfs when set, otherwise
+ * through miniaudio's default stdio VFS. Streamed sounds decode a page at a
+ * time as libretro_miniaudio_run() is called, so long music tracks need not be
+ * held in memory; the file stays open until the sound is unloaded. Decoded
+ * sounds are fully decoded up front and shared between loads of the same
+ * path. At most LIBRETRO_MINIAUDIO_MAX_SOUNDS sounds can be loaded at once.
+ *
+ * @param sound  Caller-allocated sound handle to populate. Must not be NULL.
+ * @param path   Path to the file, as understood by the VFS. Must not be NULL.
+ * @param stream true to stream from the file, false to decode it into memory.
+ * @return true on success, false if not initialized, on invalid input, when
+ *         the sound cap is reached, or on open or decode failure.
+ */
+bool libretro_miniaudio_sound_load_from_file(libretro_miniaudio_sound* sound, const char* path, bool stream) {
+   ma_result r;
+   int       slot;
+   int       i;
+
+   if (!sound || !path || !path[0] || !g_libretro_miniaudio.initialized) {
+      return false;
+   }
+
+   slot = -1;
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      if (!g_libretro_miniaudio.sounds[i].sound) {
+         slot = i;
+         break;
+      }
+   }
+   if (slot < 0) {
+      if (g_libretro_miniaudio.cfg.log_cb) {
+         g_libretro_miniaudio.cfg.log_cb(RETRO_LOG_ERROR,
+            "[libretro-miniaudio] Too many sounds loaded (max %d).\n", LIBRETRO_MINIAUDIO_MAX_SOUNDS);
+      }
+      return false;
+   }
+
+   r = ma_sound_init_from_file(&g_libretro_miniaudio.engine, path,
+      stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE, NULL, NULL, sound);
+   if (r != MA_SUCCESS) {
+      if (g_libretro_miniaudio.cfg.log_cb) {
+         g_libretro_miniaudio.cfg.log_cb(RETRO_LOG_ERROR,
+            "[libretro-miniaudio] ma_sound_init_from_file('%s') failed: %d.\n", path, (int)r);
+      }
+      return false;
+   }
+
+   g_libretro_miniaudio.sounds[slot].sound   = sound;
+   g_libretro_miniaudio.sounds[slot].name[0] = '\0';
+   g_libretro_miniaudio.sounds[slot].data    = NULL;
+   return true;
 }
 
 /**

@@ -44,6 +44,7 @@ In all other files just include the header:
 | `channels` | `uint32_t` | `2` | Must be 2, libretro takes interleaved stereo |
 | `fps` | `double` | `60.0` | Must be > 0 and match `retro_system_timing.fps` |
 | `log_cb` | `retro_log_printf_t` | `NULL` | Optional libretro log callback |
+| `vfs` | `struct retro_vfs_interface*` | `NULL` | Optional libretro VFS for `libretro_miniaudio_sound_load_from_file()`. `NULL` uses miniaudio's stdio VFS. Must outlive the engine |
 
 `fps` controls how many frames of audio are mixed per `retro_run()` call, so a mismatch causes buffer underruns or overruns. Cores running at non-standard rates (50 Hz PAL, 75 Hz arcade) should set this to match. When `sample_rate / fps` is not a whole number, `libretro_miniaudio_run()` carries the fractional remainder between calls.
 
@@ -95,6 +96,23 @@ void retro_unload_game(void) {
 
 Use `libretro_miniaudio_sound_load_from_memory()` only when the data outlives the sound.
 
+## Streaming from files
+
+Long music tracks can be streamed from disk instead of being held in memory. Get the frontend's VFS (version 1 or later) and pass it in the config, then load by path:
+
+```c
+static struct retro_vfs_interface* vfs;  // from RETRO_ENVIRONMENT_GET_VFS_INTERFACE
+
+libretro_miniaudio_config cfg = libretro_miniaudio_config_default();
+cfg.vfs = vfs;
+libretro_miniaudio_init(&cfg);
+
+// true streams the file a page at a time; false decodes it all up front.
+libretro_miniaudio_sound_load_from_file(&g_music, "/path/to/music.ogg", true);
+```
+
+Streamed sounds keep the file open until unloaded and decode their next page during `libretro_miniaudio_run()`. WAV, FLAC and MP3 (via dr_libs) and OGG (via stb_vorbis, with `LIBRETRO_MINIAUDIO_OGG`) all support streaming.
+
 ## API
 
 ```c
@@ -109,6 +127,7 @@ const char* libretro_miniaudio_version(void);
 
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
 bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
+bool libretro_miniaudio_sound_load_from_file(libretro_miniaudio_sound* sound, const char* path, bool stream);
 void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound);
