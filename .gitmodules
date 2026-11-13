@@ -1,5 +1,5 @@
 [submodule "libretro-common"]
-	path = test/libretro-common
+	path = example/libretro-common
 	url = https://github.com/libretro/libretro-common.git
 	ignore = dirty
 	branch = master

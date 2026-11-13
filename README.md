@@ -34,8 +34,6 @@ In all other files just include the header:
 #include "libretro-miniaudio.h"
 ```
 
-Up to `LIBRETRO_MINIAUDIO_MAX_SOUNDS` (default `64`) sounds can be loaded at once. Define it before the implementation to change the limit.
-
 ## Configuration
 
 `libretro_miniaudio_config_default()` returns a config struct you can customize before passing to `libretro_miniaudio_init()` (passing `NULL` uses the defaults):
@@ -74,7 +72,7 @@ bool retro_load_game(const struct retro_game_info* info) {
 
     // Copy the content data, as the frontend may free it after this returns.
     if (!libretro_miniaudio_sound_load_from_memory_copy(&g_sound, info->data, info->size, info->path)) {
-        libretro_miniaudio_uninit();
+        libretro_miniaudio_deinit();
         return false;
     }
 
@@ -91,7 +89,7 @@ void retro_run(void) {
 // Called when the game is unloaded.
 void retro_unload_game(void) {
     libretro_miniaudio_sound_unload(&g_sound);
-    libretro_miniaudio_uninit();
+    libretro_miniaudio_deinit();
 }
 ```
 
@@ -102,7 +100,7 @@ Use `libretro_miniaudio_sound_load_from_memory()` only when the data outlives th
 ```c
 libretro_miniaudio_config libretro_miniaudio_config_default(void);
 bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
-void libretro_miniaudio_uninit(void);
+void libretro_miniaudio_deinit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
 void libretro_miniaudio_set_master_volume(float volume);
@@ -122,17 +120,28 @@ uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* s
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
 ```
 
+## Options
+
+Define these before including `libretro-miniaudio.h`:
+
+| Macro | Description |
+|-------|-------------|
+| `LIBRETRO_MINIAUDIO_IMPLEMENTATION` | Emit the implementation. Define it in exactly one `.c` file. |
+| `LIBRETRO_MINIAUDIO_OGG` | Enable OGG/Vorbis decoding via `stb_vorbis.c`. |
+| `LIBRETRO_MINIAUDIO_MAX_SOUNDS` | Maximum number of sounds loaded at once. Defaults to `64`. |
+| `LIBRETRO_MINIAUDIO_NO_MA_CONFIG` | Skip the default miniaudio `MA_NO_*` options, so you can configure miniaudio yourself. Individual `MA_*` options can also be defined without it. |
+
 ## Building
 
-The example core lives in `test/` and needs the `libretro-common` submodule:
+The example core lives in `example/` and needs the `libretro-common` submodule:
 
 ```bash
 git submodule update --init
 
-# Make: builds test/miniaudio_libretro.so (.dylib on macOS, .dll on Windows)
-make -C test
+# Make: builds example/miniaudio_libretro.so (.dylib on macOS, .dll on Windows)
+make -C example
 
-# or CMake: builds build/test/miniaudio_libretro.so
+# or CMake: builds build/example/miniaudio_libretro.so
 cmake -S . -B build
 cmake --build build
 ```
@@ -140,10 +149,24 @@ cmake --build build
 ## Running
 
 ```bash
-retroarch -L test/miniaudio_libretro.so test/amen.wav
+retroarch -L example/miniaudio_libretro.so example/amen.wav
 ```
 
 The example core also plays OGG, FLAC and MP3 content.
+
+## Testing
+
+The tests in `test/` also use the `libretro-common` submodule:
+
+```bash
+# Make: builds and runs the tests (SANITIZE=1 adds AddressSanitizer and UBSan)
+make -C test
+
+# or CMake
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
 ## License
 

@@ -2,13 +2,14 @@ cmake_minimum_required(VERSION 3.11...3.31)
 
 project(libretro_miniaudio LANGUAGES C)
 
-# Build the example libretro core only when this is the top-level project.
+# Build the example libretro core and tests only when this is the top-level project.
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 	set(LIBRETRO_MINIAUDIO_IS_TOP_LEVEL ON)
 else()
 	set(LIBRETRO_MINIAUDIO_IS_TOP_LEVEL OFF)
 endif()
-option(LIBRETRO_MINIAUDIO_BUILD_TEST "Build the example libretro core in test/." ${LIBRETRO_MINIAUDIO_IS_TOP_LEVEL})
+option(LIBRETRO_MINIAUDIO_BUILD_EXAMPLE "Build the example libretro core in example/." ${LIBRETRO_MINIAUDIO_IS_TOP_LEVEL})
+option(LIBRETRO_MINIAUDIO_BUILD_TESTS "Build the tests in test/." ${LIBRETRO_MINIAUDIO_IS_TOP_LEVEL})
 
 ############################################
 # Header-only library.                     #
@@ -29,6 +30,15 @@ endif()
 # Example libretro core.                   #
 ############################################
 
-if(LIBRETRO_MINIAUDIO_BUILD_TEST)
+if(LIBRETRO_MINIAUDIO_BUILD_EXAMPLE)
+	add_subdirectory(example)
+endif()
+
+############################################
+# Tests.                                   #
+############################################
+
+if(LIBRETRO_MINIAUDIO_BUILD_TESTS)
+	enable_testing()
 	add_subdirectory(test)
 endif()
