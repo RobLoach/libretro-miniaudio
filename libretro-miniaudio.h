@@ -58,7 +58,7 @@ typedef ma_sound libretro_miniaudio_sound;
 
 libretro_miniaudio_config libretro_miniaudio_config_default(void);
 bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
-void libretro_miniaudio_uninit(void);
+void libretro_miniaudio_deinit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name);
@@ -250,7 +250,7 @@ static void libretro_miniaudio_sound_release(int i) {
  * the engine state is fully reset and libretro_miniaudio_init() may be called
  * again.
  */
-void libretro_miniaudio_uninit(void) {
+void libretro_miniaudio_deinit(void) {
    int i;
    if (g_libretro_miniaudio.initialized) {
       /* Sounds must be uninitialized while the engine, node graph and resource
@@ -342,7 +342,7 @@ void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
  * do not uninitialize it manually.
  *
  * @return Pointer to the internal ma_engine. Valid only between
- *         libretro_miniaudio_init() and libretro_miniaudio_uninit().
+ *         libretro_miniaudio_init() and libretro_miniaudio_deinit().
  */
 ma_engine* libretro_miniaudio_engine(void) {
    return &g_libretro_miniaudio.engine;
@@ -457,7 +457,7 @@ bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, 
  *
  * Only sounds currently tracked by the wrapper are touched, so this is a safe
  * no-op for NULL, a sound that was never loaded (or failed to load), a sound
- * that was already unloaded, or any sound after libretro_miniaudio_uninit().
+ * that was already unloaded, or any sound after libretro_miniaudio_deinit().
  *
  * @param sound Sound handle to release.
  */

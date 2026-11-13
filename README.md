@@ -74,7 +74,7 @@ bool retro_load_game(const struct retro_game_info* info) {
 
     // Copy the content data, as the frontend may free it after this returns.
     if (!libretro_miniaudio_sound_load_from_memory_copy(&g_sound, info->data, info->size, info->path)) {
-        libretro_miniaudio_uninit();
+        libretro_miniaudio_deinit();
         return false;
     }
 
@@ -91,7 +91,7 @@ void retro_run(void) {
 // Called when the game is unloaded.
 void retro_unload_game(void) {
     libretro_miniaudio_sound_unload(&g_sound);
-    libretro_miniaudio_uninit();
+    libretro_miniaudio_deinit();
 }
 ```
 
@@ -102,7 +102,7 @@ Use `libretro_miniaudio_sound_load_from_memory()` only when the data outlives th
 ```c
 libretro_miniaudio_config libretro_miniaudio_config_default(void);
 bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg);
-void libretro_miniaudio_uninit(void);
+void libretro_miniaudio_deinit(void);
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb);
 ma_engine* libretro_miniaudio_engine(void);
 void libretro_miniaudio_set_master_volume(float volume);

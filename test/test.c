@@ -203,7 +203,7 @@ static void check_rate(uint32_t sample_rate, double fps, int runs) {
    CHECK(libretro_miniaudio_init(&cfg));
    reset_stats();
    run_frames(runs);
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
 
    /* The running total never drifts from round(runs * rate / fps), and each
     * call emits floor or ceil of the exact per-frame count. */
@@ -237,7 +237,7 @@ static void check_reject(uint32_t sample_rate, uint32_t channels, double fps) {
    CHECK(!ok);
    CHECK(g_log_count > logs);
    if (ok) {
-      libretro_miniaudio_uninit();
+      libretro_miniaudio_deinit();
    }
 }
 
@@ -315,7 +315,7 @@ static void test_load_unload_stress(void) {
    CHECK(tracked_count() == 0);
    CHECK(no_registrations());
 
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
 }
 
 /* --- shared names: different buffers loaded under the same name --------- */
@@ -376,10 +376,10 @@ static void test_shared_names(void) {
    check_shared_name(g_amen, g_amen_size, amen_len, g_tone, g_tone_size, tone_len, true);
    check_shared_name(g_tone, g_tone_size, tone_len, g_amen, g_amen_size, amen_len, true);
 
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
 }
 
-/* --- teardown: uninit without unload, and unload edge cases ------------- */
+/* --- teardown: deinit without unload, and unload edge cases ------------- */
 
 static void test_teardown(void) {
    libretro_miniaudio_config cfg = make_config();
@@ -400,11 +400,11 @@ static void test_teardown(void) {
    CHECK(g_nonzero > 0);
    CHECK(libretro_miniaudio_sound_is_playing(&s[2]));
    CHECK(libretro_miniaudio_sound_get_position(&s[2]) > 0);
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
    CHECK(tracked_count() == 0);
    CHECK(!g_libretro_miniaudio.initialized);
 
-   /* After uninit every call is a no-op, queries return false/0 and run()
+   /* After deinit every call is a no-op, queries return false/0 and run()
     * never calls back. */
    for (i = 0; i < 3; ++i) {
       libretro_miniaudio_sound_unload(&s[i]);
@@ -421,7 +421,7 @@ static void test_teardown(void) {
    reset_stats();
    libretro_miniaudio_run(full_cb);
    CHECK(g_calls == 0);
-   libretro_miniaudio_uninit();  /* double uninit */
+   libretro_miniaudio_deinit();  /* double deinit */
 
    /* Re-init; double unload, zeroed, NULL and stale handles are no-ops. */
    CHECK(libretro_miniaudio_init(&cfg));
@@ -450,14 +450,14 @@ static void test_teardown(void) {
    libretro_miniaudio_sound_unload(&r);
    CHECK(tracked_count() == 0);
    CHECK(no_registrations());
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
 
-   /* A copy loaded in a later session, uninit without unload, then unload. */
+   /* A copy loaded in a later session, deinit without unload, then unload. */
    CHECK(libretro_miniaudio_init(&cfg));
    CHECK(libretro_miniaudio_sound_load_from_memory_copy(&s[0], g_amen, g_amen_size, "e"));
    libretro_miniaudio_sound_play(&s[0]);
    run_frames(3);
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
    libretro_miniaudio_sound_unload(&s[0]);
    CHECK(tracked_count() == 0);
 }
@@ -515,7 +515,7 @@ static void test_batch_callback(void) {
    CHECK(libretro_miniaudio_sound_get_length(&s) > 0);
 
    libretro_miniaudio_sound_unload(&s);
-   libretro_miniaudio_uninit();
+   libretro_miniaudio_deinit();
 }
 
 int main(int argc, char* argv[]) {

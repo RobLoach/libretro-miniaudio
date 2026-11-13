@@ -182,7 +182,7 @@ bool retro_load_game(const struct retro_game_info* info) {
 
   if (!libretro_miniaudio_sound_load_from_memory_copy(&g_sound, info->data, info->size, info->path)) {
     log_cb(RETRO_LOG_ERROR, "Failed to initialize sound from content data.\n");
-    libretro_miniaudio_uninit();
+    libretro_miniaudio_deinit();
     return false;
   }
 
@@ -198,7 +198,7 @@ void retro_unload_game(void) {
     libretro_miniaudio_sound_unload(&g_sound);
     g_sound_loaded = false;
   }
-  libretro_miniaudio_uninit();
+  libretro_miniaudio_deinit();
 }
 
 unsigned retro_get_region(void) {
