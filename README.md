@@ -34,8 +34,6 @@ In all other files just include the header:
 #include "libretro-miniaudio.h"
 ```
 
-Up to `LIBRETRO_MINIAUDIO_MAX_SOUNDS` (default `64`) sounds can be loaded at once. Define it before the implementation to change the limit.
-
 ## Configuration
 
 `libretro_miniaudio_config_default()` returns a config struct you can customize before passing to `libretro_miniaudio_init()` (passing `NULL` uses the defaults):
@@ -121,6 +119,17 @@ void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t fra
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
 ```
+
+## Options
+
+Define these before including `libretro-miniaudio.h`:
+
+| Macro | Description |
+|-------|-------------|
+| `LIBRETRO_MINIAUDIO_IMPLEMENTATION` | Emit the implementation. Define it in exactly one `.c` file. |
+| `LIBRETRO_MINIAUDIO_OGG` | Enable OGG/Vorbis decoding via `stb_vorbis.c`. |
+| `LIBRETRO_MINIAUDIO_MAX_SOUNDS` | Maximum number of sounds loaded at once. Defaults to `64`. |
+| `LIBRETRO_MINIAUDIO_NO_MA_CONFIG` | Skip the default miniaudio `MA_NO_*` options, so you can configure miniaudio yourself. Individual `MA_*` options can also be defined without it. |
 
 ## Building
 
