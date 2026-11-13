@@ -518,6 +518,114 @@ static void test_batch_callback(void) {
    libretro_miniaudio_deinit();
 }
 
+/* --- save states: serialize/unserialize playback state ------------------ */
+
+static void test_serialize(void) {
+   libretro_miniaudio_config cfg = make_config();
+   libretro_miniaudio_sound a, b;
+   size_t size, i;
+   unsigned char* buf;
+   unsigned char* bad;
+   uint64_t pos_a, pos_b;
+   double accum;
+
+   CHECK(libretro_miniaudio_init(&cfg));
+   size = libretro_miniaudio_serialize_size();
+   CHECK(size > 0);
+   buf = (unsigned char*)malloc(size);
+   bad = (unsigned char*)malloc(size);
+   if (!buf || !bad) {
+      CHECK(0);
+      free(buf);
+      free(bad);
+      libretro_miniaudio_deinit();
+      return;
+   }
+
+   /* The size does not depend on which sounds are loaded. */
+   CHECK(libretro_miniaudio_sound_load_from_memory(&a, g_amen, g_amen_size, "a"));
+   CHECK(libretro_miniaudio_sound_load_from_memory_copy(&b, g_tone, g_tone_size, "b"));
+   CHECK(libretro_miniaudio_serialize_size() == size);
+
+   /* Play 'b' looping at half volume, leave 'a' stopped at a known frame. */
+   libretro_miniaudio_sound_seek(&a, 1234);
+   libretro_miniaudio_sound_set_looping(&b, true);
+   libretro_miniaudio_sound_set_volume(&b, 0.5f);
+   libretro_miniaudio_set_master_volume(0.75f);
+   libretro_miniaudio_sound_play(&b);
+   run_frames(100);
+   pos_a = libretro_miniaudio_sound_get_position(&a);
+   pos_b = libretro_miniaudio_sound_get_position(&b);
+   accum = g_libretro_miniaudio.frames_accum;
+   CHECK(pos_a == 1234);
+   CHECK(pos_b > 0);
+   CHECK(libretro_miniaudio_serialize(buf, size));
+
+   /* Change everything. */
+   libretro_miniaudio_sound_stop(&b);
+   libretro_miniaudio_sound_seek(&b, 7);
+   libretro_miniaudio_sound_set_looping(&b, false);
+   libretro_miniaudio_sound_set_volume(&b, 1.0f);
+   libretro_miniaudio_sound_play(&a);
+   libretro_miniaudio_sound_seek(&a, 99);
+   libretro_miniaudio_set_master_volume(1.0f);
+   g_libretro_miniaudio.frames_accum = 0.25;
+
+   CHECK(libretro_miniaudio_unserialize(buf, size));
+   CHECK(libretro_miniaudio_sound_is_playing(&b));
+   CHECK(!libretro_miniaudio_sound_is_playing(&a));
+   CHECK(libretro_miniaudio_sound_get_position(&b) == pos_b);
+   CHECK(libretro_miniaudio_sound_get_position(&a) == pos_a);
+   CHECK(ma_sound_is_looping(&b));
+   CHECK(!ma_sound_is_looping(&a));
+   CHECK(ma_sound_get_volume(&b) == 0.5f);
+   CHECK(ma_sound_get_volume(&a) == 1.0f);
+   CHECK(libretro_miniaudio_get_master_volume() == 0.75f);
+   CHECK(g_libretro_miniaudio.frames_accum == accum);
+
+   /* Playback continues from the restored cursor. */
+   run_frames(1);
+   CHECK(libretro_miniaudio_sound_get_position(&b) > pos_b);
+
+   /* Mismatched slots are skipped: 'a' is gone, 'b' still restores. */
+   libretro_miniaudio_sound_unload(&a);
+   CHECK(libretro_miniaudio_serialize_size() == size);
+   libretro_miniaudio_sound_stop(&b);
+   CHECK(libretro_miniaudio_unserialize(buf, size));
+   CHECK(libretro_miniaudio_sound_is_playing(&b));
+   CHECK(libretro_miniaudio_sound_get_position(&b) == pos_b);
+
+   /* Truncated, NULL and garbage buffers are rejected. */
+   CHECK(!libretro_miniaudio_serialize(NULL, size));
+   CHECK(!libretro_miniaudio_serialize(buf, size - 1));
+   CHECK(!libretro_miniaudio_serialize(buf, 0));
+   CHECK(!libretro_miniaudio_unserialize(NULL, size));
+   CHECK(!libretro_miniaudio_unserialize(buf, size - 1));
+   CHECK(!libretro_miniaudio_unserialize(buf, 0));
+   for (i = 0; i < size; ++i) {
+      bad[i] = (unsigned char)(i * 37 + 11);
+   }
+   CHECK(!libretro_miniaudio_unserialize(bad, size));
+   memcpy(bad, buf, size);
+   bad[0] ^= 0xff;
+   CHECK(!libretro_miniaudio_unserialize(bad, size));
+   memcpy(bad, buf, size);
+   bad[4]++;
+   CHECK(!libretro_miniaudio_unserialize(bad, size));
+
+   libretro_miniaudio_sound_unload(&b);
+   CHECK(libretro_miniaudio_serialize_size() == size);
+   libretro_miniaudio_deinit();
+
+   /* Not initialized: size is unchanged, but nothing can be saved or loaded. */
+   CHECK(libretro_miniaudio_serialize_size() == size);
+   CHECK(!libretro_miniaudio_serialize(buf, size));
+   CHECK(!libretro_miniaudio_unserialize(buf, size));
+
+   free(buf);
+   free(bad);
+}
+
 int main(int argc, char* argv[]) {
    const char* amen_path = argc > 1 ? argv[1] : "../example/amen.wav";
 
@@ -542,6 +650,7 @@ int main(int argc, char* argv[]) {
    test_shared_names();
    test_teardown();
    test_batch_callback();
+   test_serialize();
 
    free(g_amen);
    free(g_tone);
