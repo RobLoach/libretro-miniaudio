@@ -1,15 +1,30 @@
-/*
- * libretro-miniaudio.h - single-header wrapper around miniaudio for libretro cores.
+/**
+ * @file libretro-miniaudio.h
+ * @brief Single-header wrapper around miniaudio for libretro cores.
  *
  * Usage:
  *   In exactly one .c file:
+ * @code
  *       #define LIBRETRO_MINIAUDIO_IMPLEMENTATION
  *       #include "libretro-miniaudio.h"
+ * @endcode
  *
  *   Elsewhere just:
+ * @code
  *       #include "libretro-miniaudio.h"
+ * @endcode
  *
  * The implementation block pulls in miniaudio.h with MINIAUDIO_IMPLEMENTATION and MA_NO_DEVICE_IO so libretro can drive the audio callback itself.
+ *
+ * Compile-time options (define before including this header):
+ * - LIBRETRO_MINIAUDIO_IMPLEMENTATION: emit the implementation in this
+ *   translation unit. Define it in exactly one .c file.
+ * - LIBRETRO_MINIAUDIO_NO_MA_CONFIG: skip the default MA_* miniaudio options
+ *   this header would otherwise define.
+ * - LIBRETRO_MINIAUDIO_OGG: build stb_vorbis (stb_vorbis.c must be on the
+ *   include path) into the implementation for Ogg Vorbis decoding.
+ * - LIBRETRO_MINIAUDIO_MAX_SOUNDS: maximum number of simultaneously loaded
+ *   sounds (default 64).
  */
 #ifndef LIBRETRO_MINIAUDIO_H
 #define LIBRETRO_MINIAUDIO_H
@@ -47,13 +62,27 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Configuration passed to libretro_miniaudio_init().
+ *
+ * Obtain defaults with libretro_miniaudio_config_default() and override fields
+ * as needed.
+ */
 typedef struct libretro_miniaudio_config {
-   uint32_t           sample_rate;  /* default 48000 */
-   uint32_t           channels;     /* must be 2: libretro takes interleaved stereo int16 */
-   double             fps;          /* default 60.0, must be > 0 */
-   retro_log_printf_t log_cb;       /* optional      */
+   uint32_t           sample_rate;  /**< Engine output rate in Hz. Default 48000, must be > 0. */
+   uint32_t           channels;     /**< Must be 2: libretro takes interleaved stereo int16. */
+   double             fps;          /**< Core frame rate; sets frames per run(). Default 60.0, must be > 0. */
+   retro_log_printf_t log_cb;       /**< Optional libretro log callback for errors. May be NULL (default). */
 } libretro_miniaudio_config;
 
+/**
+ * @brief Sound handle; an alias of miniaudio's ma_sound.
+ *
+ * Allocated by the caller and populated by
+ * libretro_miniaudio_sound_load_from_memory() or
+ * libretro_miniaudio_sound_load_from_memory_copy(). The address must stay
+ * stable while the sound is loaded.
+ */
 typedef ma_sound libretro_miniaudio_sound;
 
 libretro_miniaudio_config libretro_miniaudio_config_default(void);
@@ -84,6 +113,7 @@ const char* libretro_miniaudio_version(void);
 
 #ifdef LIBRETRO_MINIAUDIO_IMPLEMENTATION
 #ifndef LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
+/** @brief Ensures the implementation is emitted at most once per translation unit. */
 #define LIBRETRO_MINIAUDIO_IMPLEMENTATION_GUARD
 
 #ifdef LIBRETRO_MINIAUDIO_OGG
@@ -104,31 +134,50 @@ const char* libretro_miniaudio_version(void);
 #include <string.h>
 
 #ifndef LIBRETRO_MINIAUDIO_MAX_SOUNDS
+/**
+ * @brief Maximum number of sounds that can be loaded at once (default 64).
+ *
+ * Loads beyond this cap fail. Define before including the implementation to
+ * change it.
+ */
 #define LIBRETRO_MINIAUDIO_MAX_SOUNDS 64
 #endif
 
-/* Tracks every sound loaded through the wrapper so unload can unregister it
- * under exactly the name it was registered with, and free any owned copy. */
+/** @cond INTERNAL */
+
+/**
+ * @internal
+ * @brief Tracks every sound loaded through the wrapper so unload can
+ *        unregister it under exactly the name it was registered with, and
+ *        free any owned copy.
+ */
 typedef struct libretro_miniaudio_sound_entry {
-   ma_sound* sound;
-   char      name[24];  /* unique internal registration name */
-   void*     data;      /* owned copy of the encoded data, or NULL */
+   ma_sound* sound;     /**< Tracked sound, or NULL if the slot is free. */
+   char      name[24];  /**< Unique internal registration name. */
+   void*     data;      /**< Owned copy of the encoded data, or NULL. */
 } libretro_miniaudio_sound_entry;
 
+/**
+ * @internal
+ * @brief Global wrapper state. Zeroed when not initialized.
+ */
 typedef struct libretro_miniaudio_state {
-   bool                           initialized;
-   libretro_miniaudio_config      cfg;
-   ma_engine                      engine;
-   uint32_t                       max_frames_per_run;  /* ceil(sample_rate / fps), buffer capacity */
-   double                         frames_per_run;      /* exact sample_rate / fps */
-   double                         frames_accum;        /* carried fractional remainder */
-   float*                         buf_f32;
-   int16_t*                       buf_s16;
-   uint32_t                       load_counter;        /* makes registration names unique */
-   libretro_miniaudio_sound_entry sounds[LIBRETRO_MINIAUDIO_MAX_SOUNDS];
+   bool                           initialized;         /**< True between a successful init() and deinit(). */
+   libretro_miniaudio_config      cfg;                 /**< Copy of the config passed to init(). */
+   ma_engine                      engine;              /**< The miniaudio engine (no device). */
+   uint32_t                       max_frames_per_run;  /**< ceil(sample_rate / fps), buffer capacity. */
+   double                         frames_per_run;      /**< Exact sample_rate / fps. */
+   double                         frames_accum;        /**< Carried fractional remainder. */
+   float*                         buf_f32;             /**< Engine output scratch buffer. */
+   int16_t*                       buf_s16;             /**< Converted output handed to libretro. */
+   uint32_t                       load_counter;        /**< Makes registration names unique. */
+   libretro_miniaudio_sound_entry sounds[LIBRETRO_MINIAUDIO_MAX_SOUNDS];  /**< Loaded-sound slots. */
 } libretro_miniaudio_state;
 
+/** @internal @brief The single global wrapper state instance. */
 static libretro_miniaudio_state g_libretro_miniaudio;
+
+/** @endcond */
 
 /**
  * @brief Returns a libretro_miniaudio_config populated with default values.
@@ -154,8 +203,11 @@ libretro_miniaudio_config libretro_miniaudio_config_default(void) {
  * MA_NO_DEVICE_IO, so audio is driven by libretro_miniaudio_run() rather than
  * a backend device.
  *
- * @param cfg Provide the configuration for the miniaudio. NULL will load the defaults.
- * @return true on success, false on invalid input or engine/buffer allocation failure.
+ * @param cfg Configuration to use; copied, so it need not outlive the call.
+ *            NULL uses libretro_miniaudio_config_default(). channels must be
+ *            2, and sample_rate and fps must be > 0.
+ * @return true on success or if already initialized, false on invalid config
+ *         or engine/buffer allocation failure (logged via cfg->log_cb if set).
  */
 bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
    ma_engine_config ec;
@@ -229,8 +281,11 @@ bool libretro_miniaudio_init(const libretro_miniaudio_config* cfg) {
 }
 
 /**
+ * @internal
  * @brief Uninitializes the tracked sound in the given slot and drops its
  *        resource manager registration. The slot's data copy is not freed.
+ *
+ * @param i Index of an occupied slot in g_libretro_miniaudio.sounds.
  */
 static void libretro_miniaudio_sound_release(int i) {
    ma_resource_manager* rm;
@@ -281,9 +336,11 @@ void libretro_miniaudio_deinit(void) {
  * the fractional remainder between calls so the total does not drift,
  * converts them from float to signed 16-bit PCM, and submits them via the
  * provided libretro batch callback. Call once per retro_run() invocation.
+ * Short or failed engine reads are padded with silence. No-op when not
+ * initialized.
  *
  * @param audio_batch_cb The audio batch callback the core received via
- *                       retro_set_audio_sample_batch(). Must be non-NULL.
+ *                       retro_set_audio_sample_batch(). NULL is a no-op.
  */
 void libretro_miniaudio_run(retro_audio_sample_batch_t audio_batch_cb) {
    uint32_t frames;
@@ -349,13 +406,19 @@ ma_engine* libretro_miniaudio_engine(void) {
 }
 
 /**
+ * @internal
  * @brief Shared implementation of the sound_load_from_memory*() functions.
  *
  * Registers the encoded data with the resource manager, initializes the sound
  * from it, and records the registration so libretro_miniaudio_sound_unload()
  * can release it.
  *
- * @param copy When true, the data is duplicated and owned by the wrapper.
+ * @param sound Caller-allocated sound handle to populate.
+ * @param data  Encoded audio bytes.
+ * @param size  Size of data in bytes.
+ * @param name  Optional label used only in log messages. May be NULL.
+ * @param copy  When true, the data is duplicated and owned by the wrapper.
+ * @return true on success, false on invalid input, no free slot, or failure.
  */
 static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name, bool copy) {
    ma_resource_manager* rm;
@@ -434,16 +497,20 @@ static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sou
 /**
  * @brief Loads an encoded audio asset (wav/flac/mp3/etc.) from a memory buffer.
  *
- * The buffer is NOT copied; it must remain valid for the lifetime of the
- * engine. Useful for sounds embedded in the core via xxd / incbin /
- * build-time blobs. Every load gets its own resource manager registration.
+ * The buffer is NOT copied; it must remain valid until the sound is unloaded
+ * or libretro_miniaudio_deinit() is called. Useful for sounds embedded in the
+ * core via xxd / incbin / build-time blobs. Use
+ * libretro_miniaudio_sound_load_from_memory_copy() for transient buffers.
+ * Every load gets its own resource manager registration. At most
+ * LIBRETRO_MINIAUDIO_MAX_SOUNDS sounds can be loaded at once.
  *
- * @param sound Caller-allocated sound handle to populate.
- * @param data  Pointer to the encoded audio bytes. Must outlive the engine.
+ * @param sound Caller-allocated sound handle to populate. Must not be NULL.
+ * @param data  Pointer to the encoded audio bytes. Must not be NULL.
  * @param size  Size of the encoded buffer in bytes. Must be > 0.
  * @param name  Optional label (e.g. "sfx/jump.wav") used only in log
  *              messages. May be NULL. Names need not be unique.
- * @return true on success, false on invalid input or load failure.
+ * @return true on success, false if not initialized, on invalid input, when
+ *         the sound cap is reached, or on decode failure.
  */
 bool libretro_miniaudio_sound_load_from_memory(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name) {
    return libretro_miniaudio_sound_load_internal(sound, data, size, name, false);
@@ -481,7 +548,8 @@ void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
 /**
  * @brief Starts (or resumes) playback of the given sound.
  *
- * @param sound Sound handle to play. NULL is tolerated and treated as a no-op.
+ * @param sound Sound handle to play. NULL is tolerated and treated as a no-op,
+ *              as is any call when not initialized.
  */
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
    if (sound && g_libretro_miniaudio.initialized) {
@@ -492,7 +560,8 @@ void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
 /**
  * @brief Stops playback of the given sound without releasing it.
  *
- * @param sound Sound handle to stop. NULL is tolerated and treated as a no-op.
+ * @param sound Sound handle to stop. NULL is tolerated and treated as a no-op,
+ *              as is any call when not initialized.
  */
 void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound) {
    if (sound && g_libretro_miniaudio.initialized) {
@@ -503,7 +572,8 @@ void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound) {
 /**
  * @brief Enables or disables looping for the given sound.
  *
- * @param sound Sound handle to modify. NULL is tolerated and treated as a no-op.
+ * @param sound Sound handle to modify. NULL is tolerated and treated as a no-op,
+ *              as is any call when not initialized.
  * @param loop  true to loop on completion, false to play once.
  */
 void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool loop) {
@@ -515,7 +585,8 @@ void libretro_miniaudio_sound_set_looping(libretro_miniaudio_sound* sound, bool 
 /**
  * @brief Sets the linear playback volume for the given sound.
  *
- * @param sound  Sound handle to modify. NULL is tolerated and treated as a no-op.
+ * @param sound  Sound handle to modify. NULL is tolerated and treated as a no-op,
+ *               as is any call when not initialized.
  * @param volume Linear gain (1.0 = unity, 0.0 = silence, > 1.0 amplifies).
  */
 void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float volume) {
@@ -528,7 +599,8 @@ void libretro_miniaudio_sound_set_volume(libretro_miniaudio_sound* sound, float 
  * @brief Reports whether the given sound is currently playing.
  *
  * @param sound Sound handle to query. NULL is tolerated.
- * @return true if the sound is non-NULL and currently playing, false otherwise.
+ * @return true if the sound is non-NULL and currently playing, false otherwise
+ *         (including when not initialized).
  */
 bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) {
    if (!sound || !g_libretro_miniaudio.initialized) {
@@ -537,10 +609,32 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound) 
    return ma_sound_is_playing(sound) == MA_TRUE;
 }
 
+/**
+ * @brief Loads an encoded audio asset from a memory buffer, copying it first.
+ *
+ * Same as libretro_miniaudio_sound_load_from_memory(), except the data is
+ * duplicated and owned by the wrapper, so the caller's buffer may be freed as
+ * soon as this returns. The copy is freed by libretro_miniaudio_sound_unload()
+ * or libretro_miniaudio_deinit().
+ *
+ * @param sound Caller-allocated sound handle to populate. Must not be NULL.
+ * @param data  Pointer to the encoded audio bytes. Must not be NULL.
+ * @param size  Size of the encoded buffer in bytes. Must be > 0.
+ * @param name  Optional label used only in log messages. May be NULL.
+ * @return true on success, false if not initialized, on invalid input, when
+ *         the sound cap is reached, or on allocation or decode failure.
+ */
 bool libretro_miniaudio_sound_load_from_memory_copy(libretro_miniaudio_sound* sound, const void* data, size_t size, const char* name) {
    return libretro_miniaudio_sound_load_internal(sound, data, size, name, true);
 }
 
+/**
+ * @brief Sets the engine's master volume, applied to all sounds.
+ *
+ * No-op when not initialized.
+ *
+ * @param volume Linear gain (1.0 = unity, 0.0 = silence, > 1.0 amplifies).
+ */
 void libretro_miniaudio_set_master_volume(float volume) {
    if (!g_libretro_miniaudio.initialized) {
       return;
@@ -548,6 +642,11 @@ void libretro_miniaudio_set_master_volume(float volume) {
    ma_engine_set_volume(&g_libretro_miniaudio.engine, volume);
 }
 
+/**
+ * @brief Returns the engine's master volume.
+ *
+ * @return Linear master gain, or 1.0 when not initialized.
+ */
 float libretro_miniaudio_get_master_volume(void) {
    if (!g_libretro_miniaudio.initialized) {
       return 1.0f;
@@ -555,12 +654,31 @@ float libretro_miniaudio_get_master_volume(void) {
    return ma_engine_get_volume(&g_libretro_miniaudio.engine);
 }
 
+/**
+ * @brief Seeks the given sound to a PCM frame.
+ *
+ * The seek is applied on the next engine read, i.e. the next
+ * libretro_miniaudio_run().
+ *
+ * @param sound       Sound handle to seek. NULL is tolerated and treated as a
+ *                    no-op, as is any call when not initialized.
+ * @param frame_index Target position in PCM frames at the engine's sample rate.
+ */
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index) {
    if (sound && g_libretro_miniaudio.initialized) {
       ma_sound_seek_to_pcm_frame(sound, (ma_uint64)frame_index);
    }
 }
 
+/**
+ * @brief Returns the current playback position of the given sound.
+ *
+ * A pending seek is reported as the new position.
+ *
+ * @param sound Sound handle to query. NULL is tolerated.
+ * @return Position in PCM frames at the engine's sample rate, or 0 if sound
+ *         is NULL, not initialized, or the cursor cannot be queried.
+ */
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound) {
    ma_uint64 cursor = 0;
    if (sound && g_libretro_miniaudio.initialized) {
@@ -571,6 +689,13 @@ uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* s
    return (uint64_t)cursor;
 }
 
+/**
+ * @brief Returns the total length of the given sound.
+ *
+ * @param sound Sound handle to query. NULL is tolerated.
+ * @return Length in PCM frames at the engine's sample rate, or 0 if sound is
+ *         NULL, not initialized, or the length cannot be determined.
+ */
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound) {
    ma_uint64 length = 0;
    if (sound && g_libretro_miniaudio.initialized) {
@@ -581,6 +706,11 @@ uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sou
    return (uint64_t)length;
 }
 
+/**
+ * @brief Returns the version of the bundled miniaudio.
+ *
+ * @return Static string MA_VERSION_STRING, e.g. "0.11.25". Never NULL.
+ */
 const char* libretro_miniaudio_version(void) {
    return MA_VERSION_STRING;
 }
