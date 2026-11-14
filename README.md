@@ -118,6 +118,10 @@ bool libretro_miniaudio_sound_is_playing(const libretro_miniaudio_sound* sound);
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
+
+void libretro_miniaudio_stop_all(void);
+void libretro_miniaudio_pause_all(void);
+void libretro_miniaudio_resume_all(void);
 ```
 
 ## Options

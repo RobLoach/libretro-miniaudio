@@ -119,7 +119,7 @@ void retro_reset(void) {
   x_coord = 0;
   y_coord = 0;
   if (g_sound_loaded) {
-    libretro_miniaudio_sound_seek(&g_sound, 0);
+    libretro_miniaudio_stop_all();
     libretro_miniaudio_sound_play(&g_sound);
   }
 }

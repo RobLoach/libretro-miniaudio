@@ -103,6 +103,9 @@ float libretro_miniaudio_get_master_volume(void);
 void libretro_miniaudio_sound_seek(libretro_miniaudio_sound* sound, uint64_t frame_index);
 uint64_t libretro_miniaudio_sound_get_position(const libretro_miniaudio_sound* sound);
 uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sound);
+void libretro_miniaudio_stop_all(void);
+void libretro_miniaudio_pause_all(void);
+void libretro_miniaudio_resume_all(void);
 const char* libretro_miniaudio_version(void);
 
 #ifdef __cplusplus
@@ -155,6 +158,7 @@ typedef struct libretro_miniaudio_sound_entry {
    ma_sound* sound;     /**< Tracked sound, or NULL if the slot is free. */
    char      name[24];  /**< Unique internal registration name. */
    void*     data;      /**< Owned copy of the encoded data, or NULL. */
+   bool      paused;    /**< Stopped by pause_all(), to be restarted by resume_all(). */
 } libretro_miniaudio_sound_entry;
 
 /**
@@ -491,6 +495,7 @@ static bool libretro_miniaudio_sound_load_internal(libretro_miniaudio_sound* sou
 
    g_libretro_miniaudio.sounds[slot].sound = sound;
    g_libretro_miniaudio.sounds[slot].data  = data_copy;
+   g_libretro_miniaudio.sounds[slot].paused = false;
    return true;
 }
 
@@ -546,6 +551,23 @@ void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
 }
 
 /**
+ * @internal
+ * @brief Clears the pause_all() flag of the given sound, so an explicit
+ *        play/stop takes precedence over a later resume_all().
+ *
+ * @param sound Sound handle; untracked sounds are ignored.
+ */
+static void libretro_miniaudio_sound_clear_paused(const libretro_miniaudio_sound* sound) {
+   int i;
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      if (g_libretro_miniaudio.sounds[i].sound == sound) {
+         g_libretro_miniaudio.sounds[i].paused = false;
+         break;
+      }
+   }
+}
+
+/**
  * @brief Starts (or resumes) playback of the given sound.
  *
  * @param sound Sound handle to play. NULL is tolerated and treated as a no-op,
@@ -553,6 +575,7 @@ void libretro_miniaudio_sound_unload(libretro_miniaudio_sound* sound) {
  */
 void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
    if (sound && g_libretro_miniaudio.initialized) {
+      libretro_miniaudio_sound_clear_paused(sound);
       ma_sound_start(sound);
    }
 }
@@ -565,6 +588,7 @@ void libretro_miniaudio_sound_play(libretro_miniaudio_sound* sound) {
  */
 void libretro_miniaudio_sound_stop(libretro_miniaudio_sound* sound) {
    if (sound && g_libretro_miniaudio.initialized) {
+      libretro_miniaudio_sound_clear_paused(sound);
       ma_sound_stop(sound);
    }
 }
@@ -704,6 +728,64 @@ uint64_t libretro_miniaudio_sound_get_length(const libretro_miniaudio_sound* sou
       }
    }
    return (uint64_t)length;
+}
+
+/**
+ * @brief Stops every loaded sound and rewinds it to the start.
+ *
+ * Also forgets any sounds paused by libretro_miniaudio_pause_all(). Useful in
+ * retro_reset(). No-op when not initialized.
+ */
+void libretro_miniaudio_stop_all(void) {
+   int i;
+   if (!g_libretro_miniaudio.initialized) {
+      return;
+   }
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      if (g_libretro_miniaudio.sounds[i].sound) {
+         ma_sound_stop(g_libretro_miniaudio.sounds[i].sound);
+         ma_sound_seek_to_pcm_frame(g_libretro_miniaudio.sounds[i].sound, 0);
+         g_libretro_miniaudio.sounds[i].paused = false;
+      }
+   }
+}
+
+/**
+ * @brief Stops every playing sound, keeping its position, and remembers it
+ *        for libretro_miniaudio_resume_all().
+ *
+ * Sounds that are not playing are left alone. No-op when not initialized.
+ */
+void libretro_miniaudio_pause_all(void) {
+   int i;
+   if (!g_libretro_miniaudio.initialized) {
+      return;
+   }
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      if (g_libretro_miniaudio.sounds[i].sound && ma_sound_is_playing(g_libretro_miniaudio.sounds[i].sound)) {
+         ma_sound_stop(g_libretro_miniaudio.sounds[i].sound);
+         g_libretro_miniaudio.sounds[i].paused = true;
+      }
+   }
+}
+
+/**
+ * @brief Restarts only the sounds stopped by libretro_miniaudio_pause_all().
+ *
+ * Sounds explicitly played or stopped since the pause are not touched. No-op
+ * when not initialized.
+ */
+void libretro_miniaudio_resume_all(void) {
+   int i;
+   if (!g_libretro_miniaudio.initialized) {
+      return;
+   }
+   for (i = 0; i < LIBRETRO_MINIAUDIO_MAX_SOUNDS; ++i) {
+      if (g_libretro_miniaudio.sounds[i].sound && g_libretro_miniaudio.sounds[i].paused) {
+         ma_sound_start(g_libretro_miniaudio.sounds[i].sound);
+         g_libretro_miniaudio.sounds[i].paused = false;
+      }
+   }
 }
 
 /**
