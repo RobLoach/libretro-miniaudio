@@ -518,6 +518,87 @@ static void test_batch_callback(void) {
    libretro_miniaudio_deinit();
 }
 
+/* --- stop_all/pause_all/resume_all ------------------------------------- */
+
+static void test_all(void) {
+   libretro_miniaudio_config cfg = make_config();
+   libretro_miniaudio_sound s[3];
+   uint64_t pos[3];
+   int i;
+
+   /* No-ops before init. */
+   libretro_miniaudio_stop_all();
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_resume_all();
+
+   CHECK(libretro_miniaudio_init(&cfg));
+   for (i = 0; i < 3; ++i) {
+      CHECK(libretro_miniaudio_sound_load_from_memory(&s[i], g_amen, g_amen_size, NULL));
+   }
+   libretro_miniaudio_sound_play(&s[0]);
+   libretro_miniaudio_sound_play(&s[2]);
+   run_frames(5);
+
+   /* pause_all stops everything and keeps positions. */
+   libretro_miniaudio_pause_all();
+   for (i = 0; i < 3; ++i) {
+      CHECK(!libretro_miniaudio_sound_is_playing(&s[i]));
+      pos[i] = libretro_miniaudio_sound_get_position(&s[i]);
+   }
+   CHECK(pos[0] > 0 && pos[2] > 0 && pos[1] == 0);
+   run_frames(5);
+   reset_stats();
+   run_frames(1);
+   CHECK(g_nonzero == 0);
+
+   /* resume_all restarts only the sounds that were playing. */
+   libretro_miniaudio_resume_all();
+   CHECK(libretro_miniaudio_sound_is_playing(&s[0]));
+   CHECK(!libretro_miniaudio_sound_is_playing(&s[1]));
+   CHECK(libretro_miniaudio_sound_is_playing(&s[2]));
+   for (i = 0; i < 3; ++i) {
+      CHECK(libretro_miniaudio_sound_get_position(&s[i]) == pos[i]);
+   }
+
+   /* A second resume_all does nothing; an explicit stop beats resume_all. */
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_sound_stop(&s[0]);
+   libretro_miniaudio_resume_all();
+   CHECK(!libretro_miniaudio_sound_is_playing(&s[0]));
+   CHECK(libretro_miniaudio_sound_is_playing(&s[2]));
+   libretro_miniaudio_sound_play(&s[0]);
+   run_frames(5);
+
+   /* stop_all stops and rewinds everything, and forgets paused sounds. */
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_stop_all();
+   for (i = 0; i < 3; ++i) {
+      CHECK(!libretro_miniaudio_sound_is_playing(&s[i]));
+      CHECK(libretro_miniaudio_sound_get_position(&s[i]) == 0);
+   }
+   libretro_miniaudio_resume_all();
+   for (i = 0; i < 3; ++i) {
+      CHECK(!libretro_miniaudio_sound_is_playing(&s[i]));
+   }
+
+   /* An unloaded slot's paused flag does not leak into its next sound. */
+   libretro_miniaudio_sound_play(&s[0]);
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_sound_unload(&s[0]);
+   CHECK(libretro_miniaudio_sound_load_from_memory(&s[0], g_amen, g_amen_size, NULL));
+   libretro_miniaudio_resume_all();
+   CHECK(!libretro_miniaudio_sound_is_playing(&s[0]));
+
+   /* Deinit with sounds paused, then everything is a no-op. */
+   libretro_miniaudio_sound_play(&s[1]);
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_deinit();
+   libretro_miniaudio_stop_all();
+   libretro_miniaudio_pause_all();
+   libretro_miniaudio_resume_all();
+   CHECK(tracked_count() == 0);
+}
+
 int main(int argc, char* argv[]) {
    const char* amen_path = argc > 1 ? argv[1] : "../example/amen.wav";
 
@@ -542,6 +623,7 @@ int main(int argc, char* argv[]) {
    test_shared_names();
    test_teardown();
    test_batch_callback();
+   test_all();
 
    free(g_amen);
    free(g_tone);
